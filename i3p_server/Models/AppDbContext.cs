@@ -10,6 +10,6 @@ public class AppDbContext : DbContext
     }
         
     public DbSet<Users> Users { get; set; }
-    public DbSet<ExpenseRecord> Expenses { get; set; }
-    public DbSet<ExpenseDetail> ExpenseDetails { get; set; }
+    public DbSet<ExpenseSummary> ExpenseSummaries { get; set; }
+    public DbSet<ProcurementDetail> ProcurementDetail { get; set; }
 }
