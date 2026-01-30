@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 
 using i3p_server.Models;
+using i3p_server.Models.Enums;
 
 namespace i3p_server.Controllers;
 
@@ -23,10 +24,18 @@ public class ExpenseController : ControllerBase
             .Select(s => new 
             {
                 id = s.Id, // Important: This ID is the key to opening the next view
-                @class = s.ExpenseClass,
-                grouping = s.DbmGrouping,
-                total = s.TotalAmount,
-                release = s.MannerOfRelease
+                key_result_area = s.KeyResultArea,
+                programs_projects_activities = s.PPA,
+                expense_type = s.ExpenseType,
+                objectives = s.Objectives,
+                performance_indicator = s.PerformanceIndicator,
+                description = s.Description,
+                quantity = s.Quantity,
+                estimated_cost = s.EstimatedCost,
+                account_title = s.AccountTitle,
+                account_code = s.AccountCode,
+                date_created = DateTime.UtcNow,
+                date_updated = DateTime.UtcNow,
             })
             .ToListAsync();
 
@@ -36,94 +45,72 @@ public class ExpenseController : ControllerBase
     [HttpPost("seed-nested")]
     public async Task<IActionResult> SeedNestedData()
     {
-        // 1. Safety check
         if (await _context.ExpenseSummaries.AnyAsync())
             return BadRequest("Database already has data.");
 
         var random = new Random();
         var summariesToAdd = new List<ExpenseSummary>();
 
-        string[] classes = { "PS", "MOOE", "CO" };
-        string[] groupings = { "Training & Scholarship", "Supplies & Materials", "General Services", "Utilities", "Repairs" };
-        string[] items = { "Paper Reams", "Ballpens", "Printer Ink", "Snacks", "Meals", "Chairs", "Desks", "Internet", "Water", "Electricity" };
-        string[] units = { "lot", "piece", "box", "ream", "pax" };
+        // Reference data from your image context
+        ExpenseType[] expenseTypes = { ExpenseType.REGULAR, ExpenseType.PROJECT, ExpenseType.REPAIR_AND_MAINTENANCE };
+        string[] kraList = { "KRA 1: LEADING STRATEGICALLY", "KRA 2: MANAGING SCHOOL OPERATIONS", "KRA 3: FOCUSING ON TEACHING" };
+        string[] ppaList = { "Pay of monthly electricity bill", "Procure Janitorial Supplies", "Repair of Printing Equipment" };
+        string[] accountTitles = { "Electricity Expenses", "Office Supplies Expenses", "Repair and Maintenance" };
+        string[] units = { "unit", "piece", "lot", "ream" };
 
-        // --- Outer Loop: Create 50 Summaries ---
         for (int s = 1; s <= 50; s++)
         {
-            var expenseClass = classes[random.Next(classes.Length)];
-            var grouping = groupings[random.Next(groupings.Length)];
-            
-            // We will collect the 50 details here first
             var currentDetails = new List<ProcurementDetail>();
             decimal runningTotalAmount = 0;
 
-            // --- Inner Loop: Create 50 Details for THIS Summary ---
+            // Inner loop: Generate 50 items for the "Orange Table" view
             for (int d = 1; d <= 50; d++)
             {
-                decimal unitPrice = random.Next(100, 2000); 
-                int qty = random.Next(5, 50);
+                decimal unitPrice = random.Next(100, 5000);
+                int qty = random.Next(1, 20);
                 decimal totalLine = unitPrice * qty;
 
-                // Generate realistic monthly spread (simplified)
-                int monthlyAvg = qty / 12;
-                var timelineObj = new 
+                currentDetails.Add(new ProcurementDetail
                 {
-                    jan = monthlyAvg, feb = monthlyAvg, mar = monthlyAvg, q1 = monthlyAvg * 3,
-                    apr = monthlyAvg, may = monthlyAvg, jun = monthlyAvg, q2 = monthlyAvg * 3,
-                    jul = monthlyAvg, aug = monthlyAvg, sep = monthlyAvg, q3 = monthlyAvg * 3,
-                    oct = monthlyAvg, nov = monthlyAvg, dec = monthlyAvg, q4 = monthlyAvg * 3
-                };
-
-                var detail = new ProcurementDetail
-                {
-                    Description = $"{items[random.Next(items.Length)]} - Batch {s} Item {d}",
+                    Description = $"Detailed Item {d} for Summary {s}",
                     Unit = units[random.Next(units.Length)],
                     UnitPrice = unitPrice,
                     TotalQty = qty,
-                    TotalAmount = totalLine,
-                    // TimelineData = System.Text.Json.JsonSerializer.Serialize(timelineObj)
-                };
-
-                currentDetails.Add(detail);
-                runningTotalAmount += totalLine; // Add to parent's running total
+                    TotalAmount = totalLine
+                });
+                runningTotalAmount += totalLine;
             }
 
-            // --- Create Parent Summary ---
+            // Parent: Maps to the Summary Table (First Image)
             var summary = new ExpenseSummary
             {
-                ExpenseClass = expenseClass,
-                DbmGrouping = grouping,
-                // We use the calculated sum so the data is consistent
-                TotalAmount = runningTotalAmount, 
-                MannerOfRelease = "Direct Payment",
-                
-                // EF Core Magic: Adding the details to this collection automatically 
-                // sets up the Foreign Keys and saves them when the parent is saved.
-                Details = currentDetails 
+                KeyResultArea = kraList[random.Next(kraList.Length)],
+                ExpenseType = expenseTypes[random.Next(expenseTypes.Length)],
+                PPA = ppaList[random.Next(ppaList.Length)],
+                Objectives = "To provide essential resources for school operations.",
+                PerformanceIndicator = "# of procurements completed",
+                Description = "General Procurement Batch",
+                Quantity = 1,
+                EstimatedCost = runningTotalAmount, // Total of all 50 items
+                AccountTitle = accountTitles[random.Next(accountTitles.Length)],
+                AccountCode = "5020301000",
+                Details = currentDetails // Automatically handles Foreign Keys
             };
 
             summariesToAdd.Add(summary);
         }
 
-        try 
-        {
-            // One massive save for performance
-            _context.ExpenseSummaries.AddRange(summariesToAdd);
-            await _context.SaveChangesAsync();
-            
-            return Ok(new { 
-                message = "Database populated!", 
-                summariesCreated = 50, 
-                detailsCreated = 2500 
-            });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { error = ex.Message, detail = ex.InnerException?.Message });
-        }
+        _context.ExpenseSummaries.AddRange(summariesToAdd);
+        await _context.SaveChangesAsync();
+        
+        return Ok(new { message = "Seeded 50 summaries and 2,500 details successfully." });
     }
 
+    
+    
+    
+    
+    
     [HttpGet("{id}")]
     public async Task<IActionResult> GetSummaryWithItems(int id)
     {
