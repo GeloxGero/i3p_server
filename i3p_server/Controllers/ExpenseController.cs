@@ -8,6 +8,7 @@ using i3p_server.Models.Enums;
 namespace i3p_server.Controllers;
 
 
+
 [Route("api/expenses")]
 [ApiController]
 public class ExpenseController : ControllerBase
@@ -16,6 +17,21 @@ public class ExpenseController : ControllerBase
     private readonly AppDbContext _context;
     
     public ExpenseController(AppDbContext context) => _context = context;
+    
+    
+    
+    private DateTime GetRandomUtcDate(int year, Random random)
+    {
+        // Start of the year
+        DateTime start = new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    
+        int range = (new DateTime(year, 12, 31) - start).Days;
+    
+        // Add random days, hours, and minutes for a more natural look
+        return start.AddDays(random.Next(range))
+            .AddHours(random.Next(0, 24))
+            .AddMinutes(random.Next(0, 60));
+    }
     
     [HttpGet("GetSummaries")]
     public async Task<IActionResult> GetSummaries()
@@ -34,6 +50,7 @@ public class ExpenseController : ControllerBase
                 estimated_cost = s.EstimatedCost,
                 account_title = s.AccountTitle,
                 account_code = s.AccountCode,
+                date = s.Date,
                 date_created = DateTime.UtcNow,
                 date_updated = DateTime.UtcNow,
             })
@@ -58,6 +75,7 @@ public class ExpenseController : ControllerBase
         string[] accountTitles = { "Electricity Expenses", "Office Supplies Expenses", "Repair and Maintenance" };
         string[] units = { "unit", "piece", "lot", "ream" };
 
+        int currentYear = 2025;
         for (int s = 1; s <= 50; s++)
         {
             var currentDetails = new List<ProcurementDetail>();
@@ -81,7 +99,13 @@ public class ExpenseController : ControllerBase
                 runningTotalAmount += totalLine;
             }
 
+            
             // Parent: Maps to the Summary Table (First Image)
+            DateTime createdDate = GetRandomUtcDate(currentYear, random);
+            // Generate Updated Date (between 0 and 30 days after creation)
+            DateTime updatedDate = createdDate.AddDays(random.Next(0, 31))
+                .AddHours(random.Next(1, 12));
+            
             var summary = new ExpenseSummary
             {
                 KeyResultArea = kraList[random.Next(kraList.Length)],
@@ -94,7 +118,10 @@ public class ExpenseController : ControllerBase
                 EstimatedCost = runningTotalAmount, // Total of all 50 items
                 AccountTitle = accountTitles[random.Next(accountTitles.Length)],
                 AccountCode = "5020301000",
-                Details = currentDetails // Automatically handles Foreign Keys
+                Details = currentDetails, // Automatically handles Foreign Keys
+                Date = createdDate,
+                DateCreated = createdDate,
+                DateUpdated = updatedDate,
             };
 
             summariesToAdd.Add(summary);

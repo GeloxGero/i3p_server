@@ -12,8 +12,8 @@ using i3p_server.Models;
 namespace i3p_server.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260124043240_ExpensesDatabaseEntries")]
-    partial class ExpensesDatabaseEntries
+    [Migration("20260131052550_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -33,35 +33,68 @@ namespace i3p_server.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("DbmGrouping")
+                    b.Property<string>("AccountCode")
+                        .HasColumnType("text")
+                        .HasColumnName("account_code");
+
+                    b.Property<string>("AccountTitle")
                         .IsRequired()
                         .HasColumnType("text")
-                        .HasColumnName("dbm_grouping");
+                        .HasColumnName("account_title");
 
-                    b.Property<string>("ExpenseClass")
-                        .IsRequired()
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date");
+
+                    b.Property<DateTime>("DateCreated")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date_created");
+
+                    b.Property<DateTime>("DateUpdated")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date_updated");
+
+                    b.Property<string>("Description")
                         .HasColumnType("text")
-                        .HasColumnName("expense_class");
+                        .HasColumnName("description");
 
-                    b.Property<string>("MannerOfRelease")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("manner_of_release");
-
-                    b.Property<decimal>("TotalAmount")
+                    b.Property<decimal>("EstimatedCost")
                         .HasColumnType("numeric")
-                        .HasColumnName("total_amount");
+                        .HasColumnName("estimated_cost");
 
-                    b.Property<decimal>("UnitCost")
-                        .HasColumnType("numeric")
-                        .HasColumnName("unit_cost");
+                    b.Property<int>("ExpenseType")
+                        .HasColumnType("integer")
+                        .HasColumnName("expense_type");
+
+                    b.Property<string>("KeyResultArea")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("key_result_area");
+
+                    b.Property<string>("Objectives")
+                        .HasColumnType("text")
+                        .HasColumnName("objectives");
+
+                    b.Property<string>("PPA")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("programs_projects_activities");
+
+                    b.Property<string>("PerformanceIndicator")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("performance_indicator");
+
+                    b.Property<double>("Quantity")
+                        .HasColumnType("double precision")
+                        .HasColumnName("quantity");
 
                     b.HasKey("Id");
 
                     b.ToTable("expense_summaries");
                 });
 
-            modelBuilder.Entity("i3p_server.Models.ProcurementDetails", b =>
+            modelBuilder.Entity("i3p_server.Models.ProcurementDetail", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -147,7 +180,7 @@ namespace i3p_server.Migrations
                     b.ToTable("users");
                 });
 
-            modelBuilder.Entity("i3p_server.Models.ProcurementDetails", b =>
+            modelBuilder.Entity("i3p_server.Models.ProcurementDetail", b =>
                 {
                     b.HasOne("i3p_server.Models.ExpenseSummary", "Summary")
                         .WithMany("Details")

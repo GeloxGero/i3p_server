@@ -12,8 +12,8 @@ using i3p_server.Models;
 namespace i3p_server.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260122142422_AddExpensesWithDetailedExpenses")]
-    partial class AddExpensesWithDetailedExpenses
+    [Migration("20260130062250_ChangedExpenseSummary")]
+    partial class ChangedExpenseSummary
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -25,82 +25,109 @@ namespace i3p_server.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("i3p_server.Models.ExpenseDetail", b =>
+            modelBuilder.Entity("i3p_server.Models.ExpenseSummary", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
+                        .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("Justification")
+                    b.Property<string>("AccountCode")
                         .HasColumnType("text")
-                        .HasColumnName("justification");
+                        .HasColumnName("account_code");
 
-                    b.Property<string>("TechSpecs")
+                    b.Property<string>("AccountTitle")
+                        .IsRequired()
                         .HasColumnType("text")
-                        .HasColumnName("technical_specification");
+                        .HasColumnName("account_title");
 
-                    b.Property<string>("VendorName")
+                    b.Property<DateTime>("DateCreated")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date_created");
+
+                    b.Property<DateTime>("DateUpdated")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("date_updated");
+
+                    b.Property<string>("Description")
                         .HasColumnType("text")
-                        .HasColumnName("vendor_name");
+                        .HasColumnName("description");
+
+                    b.Property<decimal>("EstimatedCost")
+                        .HasColumnType("numeric")
+                        .HasColumnName("estimated_cost");
+
+                    b.Property<int>("ExpenseType")
+                        .HasColumnType("integer")
+                        .HasColumnName("expense_type");
+
+                    b.Property<string>("KeyResultArea")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("key_result_area");
+
+                    b.Property<string>("Objectives")
+                        .HasColumnType("text")
+                        .HasColumnName("objectives");
+
+                    b.Property<string>("PPA")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("programs_projects_activities");
+
+                    b.Property<string>("PerformanceIndicator")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("performance_indicator");
+
+                    b.Property<double>("Quantity")
+                        .HasColumnType("double precision")
+                        .HasColumnName("quantity");
 
                     b.HasKey("Id");
 
-                    b.ToTable("expense_details");
+                    b.ToTable("expense_summaries");
                 });
 
-            modelBuilder.Entity("i3p_server.Models.ExpenseRecord", b =>
+            modelBuilder.Entity("i3p_server.Models.ProcurementDetail", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
+                        .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("DbmGrouping")
+                    b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("text")
-                        .HasColumnName("dbm_grouping");
+                        .HasColumnName("item_description");
 
-                    b.Property<int>("DetailId")
+                    b.Property<int>("SummaryId")
                         .HasColumnType("integer")
-                        .HasColumnName("detail_id");
-
-                    b.Property<string>("ExpenseClass")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("expense_class");
-
-                    b.Property<string>("ExpenseItem")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("expense_item");
-
-                    b.Property<string>("MannerOfRelease")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("manner_of_release");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer")
-                        .HasColumnName("quantity");
+                        .HasColumnName("summary_id");
 
                     b.Property<decimal>("TotalAmount")
                         .HasColumnType("numeric")
                         .HasColumnName("total_amount");
 
-                    b.Property<decimal>("UnitCost")
+                    b.Property<double>("TotalQty")
+                        .HasColumnType("double precision")
+                        .HasColumnName("total_qty");
+
+                    b.Property<string>("Unit")
+                        .HasColumnType("text")
+                        .HasColumnName("unit_measure");
+
+                    b.Property<decimal>("UnitPrice")
                         .HasColumnType("numeric")
-                        .HasColumnName("unit_cost");
+                        .HasColumnName("unit_price");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DetailId");
+                    b.HasIndex("SummaryId");
 
-                    b.ToTable("expense_records");
+                    b.ToTable("procurement_details");
                 });
 
             modelBuilder.Entity("i3p_server.Models.Users", b =>
@@ -149,15 +176,20 @@ namespace i3p_server.Migrations
                     b.ToTable("users");
                 });
 
-            modelBuilder.Entity("i3p_server.Models.ExpenseRecord", b =>
+            modelBuilder.Entity("i3p_server.Models.ProcurementDetail", b =>
                 {
-                    b.HasOne("i3p_server.Models.ExpenseDetail", "Detail")
-                        .WithMany()
-                        .HasForeignKey("DetailId")
+                    b.HasOne("i3p_server.Models.ExpenseSummary", "Summary")
+                        .WithMany("Details")
+                        .HasForeignKey("SummaryId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Detail");
+                    b.Navigation("Summary");
+                });
+
+            modelBuilder.Entity("i3p_server.Models.ExpenseSummary", b =>
+                {
+                    b.Navigation("Details");
                 });
 #pragma warning restore 612, 618
         }

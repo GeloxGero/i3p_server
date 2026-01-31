@@ -38,6 +38,9 @@ public class ExpenseSummary
     [Column("account_title")] 
     public required string AccountTitle { get; set; }
     
+    [Column("date")]
+    public required DateTime Date { get; set; }
+    
     [Column("account_code")]
     public string? AccountCode { get; set; } // Usually stored as string to keep leading zeros
     
