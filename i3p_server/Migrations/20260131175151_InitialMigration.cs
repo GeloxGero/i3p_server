@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace i3p_server.Migrations
 {
     /// <inheritdoc />
-    public partial class ChangedExpenseSummary : Migration
+    public partial class InitialMigration : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -27,6 +27,7 @@ namespace i3p_server.Migrations
                     quantity = table.Column<double>(type: "double precision", nullable: false),
                     estimated_cost = table.Column<decimal>(type: "numeric", nullable: false),
                     account_title = table.Column<string>(type: "text", nullable: false),
+                    date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     account_code = table.Column<string>(type: "text", nullable: true),
                     date_created = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     date_updated = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)

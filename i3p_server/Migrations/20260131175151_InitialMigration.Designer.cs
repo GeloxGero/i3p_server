@@ -12,8 +12,8 @@ using i3p_server.Models;
 namespace i3p_server.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260131052550_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260131175151_InitialMigration")]
+    partial class InitialMigration
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
