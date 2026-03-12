@@ -28,18 +28,21 @@ public record MonthSheetDto(
 );
 
 public record SchoolPlanItemDto(
-    int Id,
-    string KraArea,
-    string SpecificProgram,
-    string ProgramActivity,
-    string Purpose,
-    string PerformanceIndicator,
-    string ResourceDescription,
-    string Quantity,
-    double EstimatedCost,
-    string AccountTitle,
-    string AccountCode,
-    string Category
+    int     Id,
+    string  KraArea,
+    string  SpecificProgram,
+    string  ProgramActivity,
+    string  Purpose,
+    string  PerformanceIndicator,
+    string  ResourceDescription,
+    string  Quantity,
+    double  EstimatedCost,
+    string  AccountTitle,
+    string  AccountCode,
+    string  Category,
+    // AR / verification — null when not yet linked
+    string? ArCode,
+    bool    IsVerified
 );
 
 // ─── Controller ───────────────────────────────────────────────────────────────
@@ -532,7 +535,9 @@ public class SchoolImplementationController : ControllerBase
                         i.EstimatedCost   ?? 0,
                         i.AccountTitle    ?? "",
                         i.AccountCode     ?? "",
-                        i.ExpenditureType ?? "Regular Expenditure"
+                        i.ExpenditureType ?? "Regular Expenditure",
+                        i.ArCode,
+                        i.IsVerified
                     ))
                     .ToList();
 
