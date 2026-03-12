@@ -91,13 +91,25 @@ public class UsersController : ControllerBase
     [HttpPost("Login")]
     public async Task<IActionResult> Login([FromBody] LoginDto login)
     {
-        // 1. Find user by email
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == login.Email);
-        if (user == null) return Unauthorized("Invalid credentials");
+        Console.WriteLine(login.email.Trim());
+        Console.WriteLine(login.email);
+        var user = await _context.Users
+            .FromSqlRaw("SELECT * FROM Users WHERE Email = {0}", login.email.Trim())
+            .FirstOrDefaultAsync();
+        
+        if (user == null)
+        {
+            Console.WriteLine("ASFASF");
+            return Unauthorized("Invalid asf");
+        };
 
         // 2. Verify password hash
-        bool isValid = BCrypt.Net.BCrypt.Verify(login.Password, user.PasswordHash);
-        if (!isValid) return Unauthorized("Invalid credentials");
+        bool isValid = BCrypt.Net.BCrypt.Verify(login.password, user.PasswordHash);
+        if (!isValid)
+        {
+            Console.WriteLine("Invalid Password");
+            return Unauthorized("Invalid credentials");
+        };
 
         // 3. Generate Token
         var token = _authService.GenerateToken(user);

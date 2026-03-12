@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using i3p_server.Models;
 
 namespace i3p_server.Services;
 
@@ -34,6 +35,14 @@ public class closedXmlService
 
         // Default to string for everything else (text, errors, etc.)
         return cell.Value.ToString();
+    }
+    
+    private double? TryGetDouble(IXLCell cell)
+    {
+        var val = GetFormattedValue(cell);
+        if (val == null) return null;
+        if (double.TryParse(val.ToString(), out double result)) return result;
+        return null;
     }
 
     public ExcelSheetReport GetExpenditureForm(string filePath)
@@ -81,10 +90,9 @@ public class closedXmlService
                 var cell = row.Cell(colNum).GetFormattedString().Trim(':').Trim();
                 sheetReport.Headers.Add(cell);
             }
-
-            var summaryStart = 0;
+            
             //get content until "total" keyword
-            for (int rowNum = 12; rowNum <= lastRow; rowNum++)
+            for (int rowNum = 13; rowNum <= lastRow; rowNum++)
             {
                 var row = rangedWorksheet.Row(rowNum);
 
@@ -94,7 +102,6 @@ public class closedXmlService
                 var firstColumn = row.FirstCell();
                 if (!firstColumn.IsEmpty() && GetFormattedValue(row.FirstCell()).ToLower().Contains("total"))
                 {
-                    summaryStart = rowNum;
                     break;
                 }
 
@@ -114,7 +121,7 @@ public class closedXmlService
 
         return sheetReport;
     }
-
+    
     public ExcelSheetReport GetProcurementPlanB(string filePath)
     {
         ExcelSheetReport sheetReport = new();
@@ -239,8 +246,7 @@ public class closedXmlService
                 var cell = row.Cell(colNum).GetFormattedString().Trim(':').Trim();
                 sheetReport.Headers.Add(cell);
             }
-
-            var summaryStart = 0;
+            
             //get content until "total" keyword
             for (int rowNum = 18; rowNum <= lastRow; rowNum++)
             {
@@ -252,7 +258,7 @@ public class closedXmlService
                 var firstColumn = row.FirstCell();
                 if (!firstColumn.IsEmpty() && GetFormattedValue(row.FirstCell()).ToLower().Contains("total"))
                 {
-                    summaryStart = rowNum;
+
                     break;
                 }
 
@@ -273,10 +279,6 @@ public class closedXmlService
         return sheetReport;
     }
     
-    
-    
-    
-    
     public List<ExcelSheetReport> GetPPMPFile(string filePath)
     {
         List<ExcelSheetReport> multipleSheetsReport = new List<ExcelSheetReport>();
@@ -285,9 +287,12 @@ public class closedXmlService
         {
             foreach (var worksheet in workbook.Worksheets)
             {
+                if (worksheet.Visibility != XLWorksheetVisibility.Visible || worksheet.IsEmpty()) continue;
                 ExcelSheetReport sheetReport = new();
                 sheetReport.SheetName = worksheet.Name;
                 var rangedWorksheet = worksheet.RangeUsed();
+                if (rangedWorksheet == null) continue;
+                
                 var lastRow = rangedWorksheet.LastRowUsed().RowNumber();
                 var lastColumn = rangedWorksheet.LastColumnUsed().ColumnNumber();
 
@@ -299,16 +304,19 @@ public class closedXmlService
                 //get auxilliaries
                 for (int i = 3; i <= 5; i++)
                 {
-                    var row = rangedWorksheet.Row(i);
-                    string key = row.Cell(1).GetFormattedString().Trim(':').Trim();
-                    string value = row.Cell(3).GetFormattedString().Trim();
+                    var row = worksheet.Row(i);
+                    // Check if the cell is null before calling methods
+                    var keyCell = row.Cell(1);
+                    var valCell = row.Cell(3);
+
+                    if (keyCell == null || keyCell.IsEmpty()) continue;
+
+                    string key = keyCell.GetFormattedString().Trim(':').Trim();
+                    string value = valCell?.GetFormattedString()?.Trim() ?? "";
+
                     if (!string.IsNullOrEmpty(key))
                     {
-                        var auxEntry = new Dictionary<string, string>
-                        {
-                            { key, value }
-                        };
-                        sheetReport.Auxilliary.Add(auxEntry);
+                        sheetReport.Auxilliary.Add(new Dictionary<string, string> { { key, value } });
                     }
                 }
                 
@@ -321,30 +329,39 @@ public class closedXmlService
                 }
                 
                 //get content until "total" keyword
+                // 3. Content (Row 17+) with "Total" and Empty Row Logic
                 for (int rowNum = 17; rowNum <= lastRow; rowNum++)
                 {
-                    var row = rangedWorksheet.Row(rowNum);
+                    var row = worksheet.Row(rowNum);
 
-
-                    // Skip rows that are empty or purely visual separators
+                    // Skip purely empty rows (no data at all)
                     if (row.IsEmpty()) continue;
-                    var firstColumn = row.FirstCell();
-                    if (!firstColumn.IsEmpty() && GetFormattedValue(row.FirstCell()).ToLower().Contains("total"))
+
+                    var firstCellVal = GetFormattedValue(row.Cell(1));
+                
+                    // Break if we hit the "Total" keyword (using the ordinal check we discussed)
+                    if (firstCellVal != null && firstCellVal.Contains("total", StringComparison.OrdinalIgnoreCase))
                     {
                         break;
                     }
 
+                    // Logic: A row is only valid if at least ONE cell has data
+                    // This prevents adding rows that just have borders but no text
                     var currentRowList = new List<object>();
+                    bool hasData = false;
 
                     for (int colNum = 1; colNum <= lastColumn; colNum++)
                     {
-                        var cell = GetFormattedValue(row.Cell(colNum));
-                        currentRowList.Add(cell);
+                        var cellValue = GetFormattedValue(row.Cell(colNum));
+                        if (cellValue != null) hasData = true;
+                    
+                        currentRowList.Add(cellValue);
                     }
 
-
-
-                    sheetReport.Data.Add(currentRowList);
+                    if (hasData)
+                    {
+                        sheetReport.Data.Add(currentRowList);
+                    }
                 }
                 multipleSheetsReport.Add(sheetReport);
             }
@@ -352,10 +369,6 @@ public class closedXmlService
 
         return multipleSheetsReport;
     }
-    
-    
-    
-    
     
     public List<ExcelSheetReport> GetSchoolImplementationPlan(string filePath)
     {
@@ -426,8 +439,5 @@ public class closedXmlService
 
         return multipleSheetsReport;
     }
-    
-    
-    
     
 }
