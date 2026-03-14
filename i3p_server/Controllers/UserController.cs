@@ -1,81 +1,63 @@
-
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-
-
+using System.Security.Claims;
 using i3p_server.Models;
 using i3p_server.Services;
 
 namespace i3p_server.Controllers;
-
 
 [Route("api/user")]
 [ApiController]
 public class UsersController : ControllerBase
 {
     private readonly AppDbContext _context;
-    private readonly AuthService _authService;
+    private readonly AuthService  _authService;
 
     public UsersController(AppDbContext context, AuthService authService)
     {
-        _context = context;
+        _context     = context;
         _authService = authService;
     }
 
+    // ── GET /api/user/GetUsers ────────────────────────────────────────────────
+    [Authorize]
     [HttpGet("GetUsers")]
     public async Task<IActionResult> GetUsers()
     {
-        // .ToListAsync() is required to actually execute the query against PostgreSQL
         var result = await _context.Users
-            .Select(x => new 
-            {
-                x.Name, // Matches the property name in your Model
-                x.Authority,
-                x.Email,
-                x.DateCreated,
-                x.DateUpdated,
-                // Admin or Users
-            })
+            .Select(x => new { x.Name, x.Authority, x.Email, x.DateCreated, x.DateUpdated })
             .ToListAsync();
-    
         return Ok(result);
     }
-    
-    [HttpGet("{id}")] // This defines the route as api/user/5
+
+    // ── GET /api/user/{id} ────────────────────────────────────────────────────
+    [Authorize]
+    [HttpGet("{id:int}")]
     public async Task<IActionResult> GetUserById(int id)
     {
-        // FindAsync is optimized for looking up primary keys
         var user = await _context.Users.FindAsync(id);
-
         if (user == null)
-        {
             return NotFound(new { message = $"User with ID {id} not found" });
-        }
 
-        // Return the user data (consider excluding the PasswordHash for security)
-        return Ok(new
-        {
-            user.Id,
-            user.Name,
-            user.Email,
-            user.Authority,
-            user.Photo,
-            user.DateCreated
-        });
+        return Ok(new { user.Id, user.Name, user.Email, user.Authority, user.Photo, user.DateCreated });
     }
-    
+
+    // ── GET /api/user/GetProfile ──────────────────────────────────────────────
+    // Requires a valid JWT. Reads the user ID from the NameIdentifier claim
+    // that AuthService stamps into every token.
+    [Authorize]
     [HttpGet("GetProfile")]
     public async Task<IActionResult> GetProfile()
     {
-        // Extract the User ID from the JWT NameIdentifier claim
-        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-        if (string.IsNullOrEmpty(userIdClaim))
-            return Unauthorized();
+        if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out int userId))
+            return Unauthorized(new { message = "Invalid or missing token claim." });
 
-        var user = await _context.Users.FindAsync(int.Parse(userIdClaim));
-
-        if (user == null) return NotFound();
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null)
+            return NotFound(new { message = "User not found." });
 
         return Ok(new
         {
@@ -84,84 +66,76 @@ public class UsersController : ControllerBase
             user.Email,
             user.Authority,
             user.Photo,
-            user.DateCreated
+            user.DateCreated,
         });
     }
 
+    // ── POST /api/user/Login ──────────────────────────────────────────────────
+    // Public — no [Authorize]
     [HttpPost("Login")]
     public async Task<IActionResult> Login([FromBody] LoginDto login)
     {
-        Console.WriteLine(login.email.Trim());
-        Console.WriteLine(login.email);
+        if (login == null || string.IsNullOrWhiteSpace(login.email))
+            return BadRequest(new { message = "Email and password are required." });
+
         var user = await _context.Users
-            .FromSqlRaw("SELECT * FROM Users WHERE Email = {0}", login.email.Trim())
-            .FirstOrDefaultAsync();
-        
-        if (user == null)
-        {
-            Console.WriteLine("ASFASF");
-            return Unauthorized("Invalid asf");
-        };
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == login.email.Trim().ToLower());
 
-        // 2. Verify password hash
-        bool isValid = BCrypt.Net.BCrypt.Verify(login.password, user.PasswordHash);
-        if (!isValid)
-        {
-            Console.WriteLine("Invalid Password");
-            return Unauthorized("Invalid credentials");
-        };
+        if (user == null || !BCrypt.Net.BCrypt.Verify(login.password, user.PasswordHash))
+            return Unauthorized(new { message = "Invalid email or password." });
 
-        // 3. Generate Token
         var token = _authService.GenerateToken(user);
 
-        return Ok(new { 
-            token = token,
-            user = new { user.Name, user.Email, user.Authority }
+        return Ok(new
+        {
+            token,
+            user = new { user.Id, user.Name, user.Email, user.Authority }
         });
     }
-    
+
+    // ── POST /api/user/CreateUser ─────────────────────────────────────────────
+    // Public — registration
     [HttpPost("CreateUser")]
     public async Task<IActionResult> Register([FromBody] Users user)
     {
-        // 1. Check if user exists
-        if (await _context.Users.AnyAsync(u => u.Email == user.Email))
-            return BadRequest(new { message = "Email already registered" });
+        if (string.IsNullOrWhiteSpace(user.PasswordHash) || user.PasswordHash.Length < 6)
+            return BadRequest(new { message = "Password must be at least 6 characters." });
 
-        // 2. Hash the password
-        // Note: BCrypt.HashPassword automatically handles salt generation internally
-        string hashedPassword = BCrypt.Net.BCrypt.HashPassword(user.PasswordHash);
+        if (await _context.Users.AnyAsync(u => u.Email.ToLower() == user.Email.ToLower()))
+            return BadRequest(new { message = "Email already registered." });
 
-        // 3. Map the full object to match your updated PostgreSQL schema
-        var newUser = new Users 
-        { 
-            Name = user.Name,
-            Email = user.Email, 
-            PasswordHash = hashedPassword,
-            Authority = user.Authority, // Defaults to Normal if not provided
-            Photo = user.Photo,
-            DateCreated = DateTime.UtcNow,
-            DateUpdated = DateTime.UtcNow
+        var newUser = new Users
+        {
+            Name         = user.Name,
+            Email        = user.Email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(user.PasswordHash),
+            Authority    = user.Authority,
+            Photo        = user.Photo,
+            DateCreated  = DateTime.UtcNow,
+            DateUpdated  = DateTime.UtcNow,
         };
 
-        try 
+        try
         {
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
-            return Ok(new { message = "User registered successfully" });
+            return Ok(new { message = "User registered successfully." });
         }
         catch (DbUpdateException ex)
         {
-            // Helpful for debugging schema mismatches in pgAdmin
-            return StatusCode(500, new { message = "Database error", detail = ex.InnerException?.Message });
+            return StatusCode(500, new { message = "Database error.", detail = ex.InnerException?.Message });
         }
     }
 
+    // ── PUT /api/user/UpdateUser ──────────────────────────────────────────────
+    [Authorize]
     [HttpPut("UpdateUser")]
-    public async Task<IActionResult> UpdateUsers([FromBody] Users user)
+    public async Task<IActionResult> UpdateUser([FromBody] Users user)
     {
-        var rows = await _context.Users.Where(x => x.Id == user.Id)
-            .ExecuteUpdateAsync(x => x.SetProperty(x => x.Name, user.Name));
+        var rows = await _context.Users
+            .Where(x => x.Id == user.Id)
+            .ExecuteUpdateAsync(x => x.SetProperty(p => p.Name, user.Name));
 
-        return Ok(user);
+        return rows == 0 ? NotFound() : Ok(new { message = "Updated." });
     }
 }

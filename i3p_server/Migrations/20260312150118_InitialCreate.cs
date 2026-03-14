@@ -248,7 +248,8 @@ namespace i3p_server.Migrations
                     AccountCode = table.Column<string>(type: "text", nullable: true),
                     ExpenditureType = table.Column<string>(type: "text", nullable: true),
                     ArCode = table.Column<string>(type: "text", nullable: true),
-                    IsVerified = table.Column<bool>(type: "boolean", nullable: false)
+                    IsVerified = table.Column<bool>(type: "boolean", nullable: false),
+                    Status = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {

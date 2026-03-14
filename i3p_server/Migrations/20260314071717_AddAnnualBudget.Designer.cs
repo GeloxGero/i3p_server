@@ -12,8 +12,8 @@ using i3p_server.Models;
 namespace i3p_server.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260312075825_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260314071717_AddAnnualBudget")]
+    partial class AddAnnualBudget
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -250,6 +250,9 @@ namespace i3p_server.Migrations
                     b.Property<string>("SipProgram")
                         .HasColumnType("text");
 
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("SchoolImplementationId");
@@ -447,6 +450,9 @@ namespace i3p_server.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<double?>("AnnualBudget")
+                        .HasColumnType("double precision");
 
                     b.Property<string>("AuxilliaryJson")
                         .HasColumnType("text");

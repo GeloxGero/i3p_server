@@ -7,6 +7,8 @@ namespace i3p_server.Models;
 // 1. This is the main entity that will become a table
 // ─── AnnualProcurementPlan ────────────────────────────────────────────────────
  
+// ─── AnnualProcurementPlan ────────────────────────────────────────────────────
+ 
 public class AnnualProcurementPlan
 {
     [Key]
@@ -21,9 +23,7 @@ public class AnnualProcurementPlan
  
     public List<AppItem> Items { get; set; } = new();
 }
- 
-// ─── AppItem ──────────────────────────────────────────────────────────────────
- 
+
 public class AppItem
 {
     [Key] public int Id { get; set; }

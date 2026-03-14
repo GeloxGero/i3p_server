@@ -7,17 +7,19 @@ namespace i3p_server.Controllers;
 
 // ─── Response DTOs ────────────────────────────────────────────────────────────
 
-/// <summary>Lightweight header returned by GET /api/SchoolImplementation</summary>
-public record SchoolImplementationHeaderDto(int Id, int Year, string School, double TotalEstimatedCost);
+public record SchoolImplementationHeaderDto(int Id, int Year, string School, double TotalEstimatedCost, double? AnnualBudget);
 
-/// <summary>Full plan returned by GET /api/SchoolImplementation/{id}</summary>
 public record SchoolImplementationDetailDto(
     int Id,
     int Year,
     string School,
     double TotalEstimatedCost,
+    double? AnnualBudget,
     List<MonthSheetDto> Months
 );
+
+/// <summary>Body for PUT /api/SchoolImplementation/{id}/budget</summary>
+public record SetBudgetRequest(double? AnnualBudget);
 
 public record MonthSheetDto(
     string Month,
@@ -28,24 +30,64 @@ public record MonthSheetDto(
 );
 
 public record SchoolPlanItemDto(
-    int     Id,
-    string  KraArea,
-    string  SpecificProgram,
-    string  ProgramActivity,
-    string  Purpose,
-    string  PerformanceIndicator,
-    string  ResourceDescription,
-    string  Quantity,
-    double  EstimatedCost,
-    string  AccountTitle,
-    string  AccountCode,
-    string  Category,
-    // AR / verification — null when not yet linked
-    string? ArCode,
-    bool    IsVerified
+    int       Id,
+    string    KraArea,
+    string    SpecificProgram,
+    string    ProgramActivity,
+    string    Purpose,
+    string    PerformanceIndicator,
+    string    ResourceDescription,
+    string    Quantity,
+    double    EstimatedCost,
+    string    AccountTitle,
+    string    AccountCode,
+    string    Category,
+    string?   ArCode,
+    bool      IsVerified,
+    SipStatus Status
 );
 
-// ─── Controller ───────────────────────────────────────────────────────────────
+public record CreateItemRequest(
+    string  Date,
+    string  Kra,
+    string  SipProgram,
+    string  Activity,
+    string? Purpose,
+    string? Indicator,
+    string? Resources,
+    string? Quantity,
+    double  EstimatedCost,
+    string? AccountTitle,
+    string? AccountCode,
+    string  ExpenditureType,
+    SipStatus Status
+);
+
+// ─── Template Column Layout ───────────────────────────────────────────────────
+// The official SIP template has 4 side-by-side category sections on every month sheet:
+//
+//   Section 1 — Regular Expenditure        : cols A–J  (1–10)
+//   [gap col K = 11]
+//   Section 2 — Project Related Expenditure: cols L–U  (12–21)
+//   [gap col V = 22]
+//   Section 3 — Repair and Maintenance     : cols W–AF (23–32)
+//   [gap col AG = 33]
+//   Section 4 — Others                     : cols AH–AQ(34–43)
+//
+//   Within each 10-column section (0-indexed offset from section start):
+//     +0  KRA
+//     +1  Specific Program (SIP)
+//     +2  Programs/Projects/Activities
+//     +3  Purpose / Objectives
+//     +4  Performance Indicator
+//     +5  Resources Needed Description
+//     +6  Resources Needed Quantity
+//     +7  Estimated Cost
+//     +8  Account Title
+//     +9  Account Code
+//
+//   Header row: row 4  (1-based)
+//   Data rows : row 5 onward
 
 [Route("api/[controller]")]
 [ApiController]
@@ -67,32 +109,59 @@ public class SchoolImplementationController : ControllerBase
         "Others"
     ];
 
+    // Each tuple: (category name, 1-based starting column of that section)
+    private static readonly (string Category, int StartCol)[] TemplateSections =
+    [
+        ("Regular Expenditure",         1),
+        ("Project Related Expenditure", 12),
+        ("Repair and Maintenance",      23),
+        ("Others",                      34),
+    ];
+
+    // Within a section, offset from StartCol (0-based)
+    private const int OffKra      = 0;
+    private const int OffSip      = 1;
+    private const int OffPpa      = 2;
+    private const int OffPurpose  = 3;
+    private const int OffPerfInd  = 4;
+    private const int OffResDesc  = 5;
+    private const int OffQty      = 6;
+    private const int OffCost     = 7;
+    private const int OffAccTitle = 8;
+    private const int OffAccCode  = 9;
+
+    private const int HeaderRow = 4; // 1-based row containing column labels
+    private const int DataStart = 5; // first data row
+
+    // Required header keywords (lowercased) used for template validation
+    private static readonly string[] RequiredHeaderKeywords =
+    [
+        "key result area",
+        "specific program",
+        "programs/projects",
+        "estimated",
+        "account"
+    ];
+
     public SchoolImplementationController(AppDbContext context)
     {
         _context = context;
     }
 
     // ── GET /api/SchoolImplementation ─────────────────────────────────────────
-    // Lightweight list for the year dropdown. Includes the running total so the
-    // frontend can display it without fetching the full plan.
     [HttpGet]
     public async Task<ActionResult<IEnumerable<SchoolImplementationHeaderDto>>> GetPlans()
     {
         var plans = await _context.SchoolImplementations
             .OrderByDescending(s => s.Year)
             .Select(s => new SchoolImplementationHeaderDto(
-                s.Id,
-                s.Year,
-                s.SheetName,
-                s.TotalEstimatedCost
-            ))
+                s.Id, s.Year, s.SheetName, s.TotalEstimatedCost, s.AnnualBudget))
             .ToListAsync();
 
         return Ok(plans);
     }
 
     // ── GET /api/SchoolImplementation/{id} ────────────────────────────────────
-    // Full plan with items grouped by month → category, subtotals, grand totals.
     [HttpGet("{id:int}")]
     public async Task<ActionResult<SchoolImplementationDetailDto>> GetPlanById(int id)
     {
@@ -103,34 +172,28 @@ public class SchoolImplementationController : ControllerBase
         if (plan is null)
             return NotFound($"Plan with id {id} not found.");
 
-        var monthDtos = BuildMonthDtos(plan.Items);
-
         var dto = new SchoolImplementationDetailDto(
-            plan.Id,
-            plan.Year,
-            plan.SheetName,
-            plan.TotalEstimatedCost,
-            monthDtos
-        );
+            plan.Id, plan.Year, plan.SheetName, plan.TotalEstimatedCost, plan.AnnualBudget,
+            BuildMonthDtos(plan.Items));
 
         return Ok(dto);
     }
 
     // ── POST /api/SchoolImplementation/import ─────────────────────────────────
-    // Parses every month sheet (skips "Total" and unrecognised sheets).
+    // Accepts ONLY files matching the official SIP template layout.
     //
-    // APPEND behaviour:
-    //   • If a plan for the detected year already exists → new items are APPENDED
-    //     to the existing ones and TotalEstimatedCost is increased accordingly.
-    //   • If no plan exists yet → a new one is created.
+    // Template structure (per month sheet):
+    //   Row 1 : "SCHOOL IMPLEMENTATION PLAN — <MONTH>" title
+    //   Row 2 : Instruction text
+    //   Row 3 : Category section labels
+    //   Row 4 : Column headers (KRA / SIP / PPA / … repeated 4×)
+    //   Row 5+: Data rows (one row = one item; same row number = same item across all 4 sections)
     //
-    // This means importing the same file twice will duplicate rows; the intent is
-    // that each import file covers months not yet in the database.
+    // The 4 sections are laid out horizontally:
+    //   Regular Expenditure (A–J) | gap | Project Related (L–U) | gap |
+    //   Repair and Maintenance (W–AF) | gap | Others (AH–AQ)
     //
-    // Column layouts supported (1-based, ClosedXML):
-    //   No SiP, no gap : KRA=1  PPA=2  Purpose=3  PerfInd=4  ResDesc=5  Qty=6  Cost=7  AccTitle=8  AccCode=9
-    //   SiP, no gap    : KRA=1  SiP=2  PPA=3  Purpose=4  PerfInd=5  ResDesc=6  Qty=7  Cost=8  AccTitle=9  AccCode=10
-    //   SiP + gap      : KRA=1  SiP=2  PPA=3  [blank]=4  Purpose=5  PerfInd=6  ResDesc=7  Qty=8  Cost=9  AccTitle=10  AccCode=11
+    // Validation rejects files that do not match this header signature.
     [HttpPost("import")]
     public async Task<IActionResult> ImportExcel(IFormFile file)
     {
@@ -138,15 +201,15 @@ public class SchoolImplementationController : ControllerBase
             return BadRequest("No file provided.");
 
         if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) &&
-            !file.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+            !file.FileName.EndsWith(".xls",  StringComparison.OrdinalIgnoreCase))
             return BadRequest("Only .xlsx / .xls files are accepted.");
 
-        using var stream = file.OpenReadStream();
+        using var stream   = file.OpenReadStream();
         using var workbook = new XLWorkbook(stream);
 
-        var parsedItems = new List<ImplementationItem>();
-        int? detectedYear = null;
-        string? detectedSchoolName = null;
+        var parsedItems     = new List<ImplementationItem>();
+        int? detectedYear   = null;
+        string? schoolName  = null;
 
         foreach (var worksheet in workbook.Worksheets)
         {
@@ -157,150 +220,70 @@ public class SchoolImplementationController : ControllerBase
 
             if (worksheet.RangeUsed() is null) continue;
 
-            int lastRow = worksheet.LastRowUsed()!.RowNumber();
-            int lastCol = worksheet.LastColumnUsed()!.ColumnNumber();
+            // ── Template validation ───────────────────────────────────────────
+            // Verify the header row (row 4) matches the expected column pattern.
+            var validationError = ValidateTemplateHeaders(worksheet, sheetName);
+            if (validationError is not null)
+                return BadRequest(validationError);
 
-            // ── Find header row ───────────────────────────────────────────────
-            int headerRow = -1;
-            bool hasSip = false;
-            bool hasGap = false;
-
-            for (int r = 1; r <= Math.Min(lastRow, 20); r++)
-            {
-                var joined = string.Join(" ",
-                    Enumerable.Range(1, lastCol).Select(c => worksheet.Cell(r, c).GetString())
-                ).ToLower();
-
-                if (joined.Contains("key result area") || joined.Contains("programs/projects"))
-                {
-                    headerRow = r;
-                    hasSip = joined.Contains("specific program") || joined.Contains("sip");
-
-                    if (hasSip)
-                    {
-                        // Phantom blank column: cell at col 4 empty, col 5 contains "purpose"
-                        var afterPpa   = worksheet.Cell(r, 4).GetString().Trim();
-                        var twoAfter   = worksheet.Cell(r, 5).GetString().Trim().ToLower();
-                        hasGap = afterPpa == "" && twoAfter.Contains("purpose");
-                    }
-                    break;
-                }
-            }
-
-            if (headerRow < 0) continue;
-
-            // ── Detect year & school name from title rows above the header ────
-            // We only need to do this once; subsequent sheets use the same values.
+            // ── Detect year & school name from row 1 ──────────────────────────
             if (!detectedYear.HasValue)
             {
-                for (int r = 1; r < headerRow; r++)
+                var titleCell = worksheet.Cell(1, 1).GetString();
+                schoolName = titleCell.Trim();
+
+                var yearMatch = System.Text.RegularExpressions.Regex
+                    .Match(titleCell, @"\b(20\d{2})\b");
+                if (yearMatch.Success && int.TryParse(yearMatch.Value, out int yr))
+                    detectedYear = yr;
+
+                // Also scan rows 1-3 for a year number
+                if (!detectedYear.HasValue)
                 {
-                    for (int c = 1; c <= lastCol; c++)
+                    for (int r = 1; r <= 3 && !detectedYear.HasValue; r++)
                     {
-                        var cellText = worksheet.Cell(r, c).GetString();
-                        if (string.IsNullOrWhiteSpace(cellText)) continue;
-
-                        // First non-empty cell in the title area → treat as school name
-                        detectedSchoolName ??= cellText.Trim();
-
-                        // Look for a 4-digit year starting with "20"
-                        var match = System.Text.RegularExpressions.Regex
-                            .Match(cellText, @"\b(20\d{2})\b");
-                        if (match.Success && int.TryParse(match.Value, out int yr))
-                            detectedYear = yr;
+                        int lastCol = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+                        for (int c = 1; c <= lastCol; c++)
+                        {
+                            var txt   = worksheet.Cell(r, c).GetString();
+                            var match = System.Text.RegularExpressions.Regex.Match(txt, @"\b(20\d{2})\b");
+                            if (match.Success && int.TryParse(match.Value, out int y2))
+                            {
+                                detectedYear = y2;
+                                break;
+                            }
+                        }
                     }
-                    if (detectedYear.HasValue) break;
                 }
 
-                detectedYear ??= DateTime.Now.Year;
-                detectedSchoolName ??= $"School Implementation Plan {detectedYear}";
+                detectedYear  ??= DateTime.Now.Year;
+                schoolName    ??= $"School Implementation Plan {detectedYear}";
             }
 
-            // ── Build column index map (1-based) ──────────────────────────────
-            int gap = hasGap ? 1 : 0;
-            var col = hasSip
-                ? new ColMap(Kra:1, Sip:2, Ppa:3, Purpose:4+gap, PerfInd:5+gap,
-                             ResDesc:6+gap, Qty:7+gap, Cost:8+gap, AccTitle:9+gap, AccCode:10+gap)
-                : new ColMap(Kra:1, Sip:-1, Ppa:2, Purpose:3, PerfInd:4,
-                             ResDesc:5, Qty:6, Cost:7, AccTitle:8, AccCode:9);
+            // ── Parse data rows ───────────────────────────────────────────────
+            int monthIndex = Array.IndexOf(MonthOrder, normalizedMonth) + 1;
+            var dateString = $"{detectedYear}-{monthIndex:D2}-01";
+            int lastRow    = worksheet.LastRowUsed()!.RowNumber();
 
-            // ── Parse data rows; stop after the grand-total line ──────────────
-            string currentCategory = "Regular Expenditure";
-            string[] categoryKeywords =
-            [
-                "Regular Expenditure",
-                "Project Related Expenditure",
-                "Repair and Maintenance",
-                "Others"
-            ];
-
-            for (int r = headerRow + 1; r <= lastRow; r++)
+            for (int r = DataStart; r <= lastRow; r++)
             {
-                var kra      = worksheet.Cell(r, col.Kra).GetString().Trim();
-                var ppa      = worksheet.Cell(r, col.Ppa).GetString().Trim();
-                var costText = worksheet.Cell(r, col.Cost).GetString().Trim();
-
-                // Stop at grand-total line (mirrors frontend parser)
-                if (ppa.Contains("total budget", StringComparison.OrdinalIgnoreCase) ||
-                    kra.Contains("total budget", StringComparison.OrdinalIgnoreCase))
-                    break;
-
-                // Category header row
-                var matchedCat = categoryKeywords.FirstOrDefault(c =>
-                    ppa.Contains(c, StringComparison.OrdinalIgnoreCase) ||
-                    kra.Contains(c, StringComparison.OrdinalIgnoreCase));
-                if (matchedCat is not null) { currentCategory = matchedCat; continue; }
-
-                // Sub-total row — skip (we recalculate server-side)
-                if (ppa.Contains("SUB-TOTAL", StringComparison.OrdinalIgnoreCase) ||
-                    kra.Contains("SUB-TOTAL", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                // Blank / NONE rows
-                if (string.IsNullOrWhiteSpace(kra) && string.IsNullOrWhiteSpace(ppa)) continue;
-                if (ppa.Equals("NONE", StringComparison.OrdinalIgnoreCase) ||
-                    kra.Equals("NONE", StringComparison.OrdinalIgnoreCase)) continue;
-
-                // Parse cost — strip currency symbols, commas, spaces
-                var cleanCost = System.Text.RegularExpressions.Regex.Replace(costText, @"[₱,\s]", "");
-                double.TryParse(cleanCost,
-                    System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out double estimatedCost);
-
-                if (string.IsNullOrWhiteSpace(ppa) && estimatedCost == 0) continue;
-
-                var sip = col.Sip > 0
-                    ? worksheet.Cell(r, col.Sip).GetString().Trim()
-                    : "Unimplemented";
-
-                // Encode month as first day of that month in the detected year
-                int monthIndex = Array.IndexOf(MonthOrder, normalizedMonth) + 1;
-                var dateString = $"{detectedYear}-{monthIndex:D2}-01";
-
-                parsedItems.Add(new ImplementationItem
+                // Parse items from each of the 4 sections in this row
+                foreach (var (category, startCol) in TemplateSections)
                 {
-                    Date            = dateString,
-                    Kra             = kra,
-                    SipProgram      = string.IsNullOrWhiteSpace(sip) ? "Unimplemented" : sip,
-                    ExpenditureType = currentCategory,
-                    Activity        = ppa,
-                    Purpose         = worksheet.Cell(r, col.Purpose).GetString().Trim(),
-                    Indicator       = worksheet.Cell(r, col.PerfInd).GetString().Trim(),
-                    Resources       = worksheet.Cell(r, col.ResDesc).GetString().Trim(),
-                    Quantity        = worksheet.Cell(r, col.Qty).GetString().Trim(),
-                    EstimatedCost   = estimatedCost,
-                    AccountTitle    = worksheet.Cell(r, col.AccTitle).GetString().Trim(),
-                    AccountCode     = worksheet.Cell(r, col.AccCode).GetString().Trim(),
-                });
+                    var item = ParseRowSection(worksheet, r, startCol, category, dateString);
+                    if (item is not null)
+                        parsedItems.Add(item);
+                }
             }
         }
 
         if (parsedItems.Count == 0)
-            return BadRequest("No data rows could be parsed from the uploaded file.");
+            return BadRequest(
+                "No data rows could be parsed. Make sure the file matches the " +
+                "official School Implementation Plan template and contains at least one data row.");
 
-        int year             = detectedYear ?? DateTime.Now.Year;
-        string schoolName    = detectedSchoolName ?? $"School Implementation Plan {year}";
+        int    year         = detectedYear ?? DateTime.Now.Year;
+        string name         = schoolName   ?? $"School Implementation Plan {year}";
         double importedTotal = parsedItems.Sum(i => i.EstimatedCost ?? 0);
 
         // ── Append or create ──────────────────────────────────────────────────
@@ -309,23 +292,21 @@ public class SchoolImplementationController : ControllerBase
 
         if (existing is not null)
         {
-            // Append new items and add their cost to the running total
             foreach (var item in parsedItems)
             {
                 item.SchoolImplementationId = existing.Id;
                 _context.ImplementationItems.Add(item);
             }
             existing.TotalEstimatedCost += importedTotal;
-            // Optionally update school name if the existing one is the placeholder
             if (existing.SheetName.StartsWith("School Implementation Plan "))
-                existing.SheetName = schoolName;
+                existing.SheetName = name;
         }
         else
         {
             _context.SchoolImplementations.Add(new SchoolImplementation
             {
                 Year               = year,
-                SheetName          = schoolName,
+                SheetName          = name,
                 TotalEstimatedCost = importedTotal,
                 Items              = parsedItems
             });
@@ -335,24 +316,44 @@ public class SchoolImplementationController : ControllerBase
 
         return Ok(new
         {
-            Message     = existing is not null
+            Message = existing is not null
                 ? $"Appended {parsedItems.Count} items to existing {year} plan."
                 : $"Created new plan for {year} with {parsedItems.Count} items.",
-            Year        = year,
-            ItemCount   = parsedItems.Count,
+            Year          = year,
+            ItemCount     = parsedItems.Count,
             ImportedTotal = importedTotal
         });
     }
 
-    // ── POST /api/SchoolImplementation/item ───────────────────────────────────
-    // Add a single item. TotalEstimatedCost is updated immediately.
-    [HttpPost("item")]
-    public async Task<IActionResult> AddImplementationItem([FromBody] ImplementationItem newItem)
+    // ── PUT /api/SchoolImplementation/{id}/budget ─────────────────────────────
+    // Admin sets (or clears) the annual budget ceiling for a plan.
+    // Send { "annualBudget": 1500000 } to set, { "annualBudget": null } to clear.
+    [HttpPut("{id:int}/budget")]
+    public async Task<IActionResult> SetBudget(int id, [FromBody] SetBudgetRequest req)
     {
-        if (string.IsNullOrEmpty(newItem.Date))
+        var plan = await _context.SchoolImplementations.FirstOrDefaultAsync(s => s.Id == id);
+        if (plan is null) return NotFound($"Plan {id} not found.");
+
+        plan.AnnualBudget = req.AnnualBudget;
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            Message      = req.AnnualBudget.HasValue
+                ? $"Annual budget set to ₱{req.AnnualBudget:N2}."
+                : "Annual budget cleared.",
+            AnnualBudget = plan.AnnualBudget
+        });
+    }
+
+    // ── POST /api/SchoolImplementation/item ───────────────────────────────────
+    [HttpPost("item")]
+    public async Task<IActionResult> AddImplementationItem([FromBody] CreateItemRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.Date))
             return BadRequest("Item must have a valid Date.");
 
-        if (!DateTime.TryParse(newItem.Date, out DateTime itemDate))
+        if (!DateTime.TryParse(req.Date, out DateTime itemDate))
             return BadRequest("Invalid Date format.");
 
         int targetYear = itemDate.Year;
@@ -370,34 +371,48 @@ public class SchoolImplementationController : ControllerBase
                 Items              = new List<ImplementationItem>()
             };
             _context.SchoolImplementations.Add(yearlyPlan);
-            await _context.SaveChangesAsync(); // get the new Id before adding child
+            await _context.SaveChangesAsync();
         }
 
-        newItem.SchoolImplementationId = yearlyPlan.Id;
+        var hex    = Convert.ToHexString(Guid.NewGuid().ToByteArray())[..6];
+        var arCode = $"AR-{targetYear}-{hex}";
+
+        var newItem = new ImplementationItem
+        {
+            SchoolImplementationId = yearlyPlan.Id,
+            Date            = req.Date,
+            Kra             = req.Kra,
+            SipProgram      = req.SipProgram,
+            Activity        = req.Activity,
+            Purpose         = req.Purpose,
+            Indicator       = req.Indicator,
+            Resources       = req.Resources,
+            Quantity        = req.Quantity,
+            EstimatedCost   = req.EstimatedCost,
+            AccountTitle    = req.AccountTitle,
+            AccountCode     = req.AccountCode,
+            ExpenditureType = req.ExpenditureType,
+            Status          = req.Status,
+            ArCode          = arCode,
+            IsVerified      = false,
+        };
+
         _context.ImplementationItems.Add(newItem);
-
-        // Keep the running total in sync
-        yearlyPlan.TotalEstimatedCost += newItem.EstimatedCost ?? 0;
-
+        yearlyPlan.TotalEstimatedCost += req.EstimatedCost;
         await _context.SaveChangesAsync();
 
-        return Ok(new { Message = "Item added successfully", PlanId = yearlyPlan.Id, ItemId = newItem.Id });
+        return Ok(new { Message = "Item added successfully", PlanId = yearlyPlan.Id, ItemId = newItem.Id, ArCode = arCode });
     }
 
     // ── DELETE /api/SchoolImplementation/item/{itemId} ────────────────────────
-    // Remove a single item and subtract its cost from the parent plan's total.
     [HttpDelete("item/{itemId:int}")]
     public async Task<IActionResult> RemoveImplementationItem(int itemId)
     {
-        var item = await _context.ImplementationItems
-            .FirstOrDefaultAsync(i => i.Id == itemId);
-
-        if (item is null)
-            return NotFound("Item not found.");
+        var item = await _context.ImplementationItems.FirstOrDefaultAsync(i => i.Id == itemId);
+        if (item is null) return NotFound("Item not found.");
 
         var plan = await _context.SchoolImplementations
             .FirstOrDefaultAsync(s => s.Id == item.SchoolImplementationId);
-
         if (plan is not null)
         {
             plan.TotalEstimatedCost -= item.EstimatedCost ?? 0;
@@ -411,8 +426,6 @@ public class SchoolImplementationController : ControllerBase
     }
 
     // ── POST /api/SchoolImplementation/recalculate/{id} ───────────────────────
-    // Utility: recompute TotalEstimatedCost from scratch by summing all child items.
-    // Useful if the total ever drifts due to direct DB edits or partial imports.
     [HttpPost("recalculate/{id:int}")]
     public async Task<IActionResult> RecalculateTotal(int id)
     {
@@ -437,10 +450,9 @@ public class SchoolImplementationController : ControllerBase
 
         var random       = new Random();
         var allReports   = new List<SchoolImplementation>();
-        string[] kras          = ["KRA 1: Strategic Leadership", "KRA 2: Operations Management", "KRA 3: Teaching & Learning", "KRA 4: HR Development"];
-        string[] accountTitles = ["Electricity Expenses", "Internet Subscription", "Office Supplies", "Security Services", "Training Expenses", "Repair & Maintenance"];
-        string[] programs      = ["Overhead", "ADM", "Senior High School Program", "SBM Initiatives", "Health & Nutrition"];
-        string[] expenseTypes  = ["Regular Expenditure", "Project Related Expenditure", "Repair and Maintenance"];
+        string[] kras    = ["KRA 1: Strategic Leadership", "KRA 2: Operations Management", "KRA 3: Teaching & Learning", "KRA 4: HR Development"];
+        string[] titles  = ["Electricity Expenses", "Internet Subscription", "Office Supplies", "Security Services", "Training Expenses"];
+        string[] programs = ["Overhead", "ADM", "Senior High School Program", "SBM Initiatives", "Health & Nutrition"];
 
         for (int i = 1; i <= 50; i++)
         {
@@ -450,11 +462,9 @@ public class SchoolImplementationController : ControllerBase
                 Year      = 2000 + i,
                 Items     = new List<ImplementationItem>()
             };
-
             double total = 0;
-            int daysInYear   = DateTime.IsLeapYear(report.Year) ? 366 : 365;
-            var startOfYear  = new DateTime(report.Year, 1, 1);
-
+            int daysInYear  = DateTime.IsLeapYear(report.Year) ? 366 : 365;
+            var startOfYear = new DateTime(report.Year, 1, 1);
             for (int j = 1; j <= 100; j++)
             {
                 double cost = random.Next(500, 50000);
@@ -464,18 +474,17 @@ public class SchoolImplementationController : ControllerBase
                     Date            = startOfYear.AddDays(random.Next(0, daysInYear)).ToString("yyyy-MM-dd"),
                     Kra             = kras[random.Next(kras.Length)],
                     SipProgram      = programs[random.Next(programs.Length)],
-                    ExpenditureType = expenseTypes[random.Next(expenseTypes.Length)],
+                    ExpenditureType = CategoryOrder[random.Next(CategoryOrder.Length)],
                     Activity        = $"Activity {j} for {report.Year}",
                     Purpose         = "Support school operations and learner development",
                     Indicator       = $"Target met for item {j}",
                     Resources       = "Standard Operating Supplies",
                     Quantity        = random.Next(1, 10).ToString(),
                     EstimatedCost   = cost,
-                    AccountTitle    = accountTitles[random.Next(accountTitles.Length)],
+                    AccountTitle    = titles[random.Next(titles.Length)],
                     AccountCode     = (5020000000 + random.Next(1000, 9999)).ToString()
                 });
             }
-
             report.TotalEstimatedCost = total;
             allReports.Add(report);
         }
@@ -486,6 +495,96 @@ public class SchoolImplementationController : ControllerBase
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Validates that row 4 of the worksheet contains the expected column headers
+    /// for all 4 category sections. Returns an error message string on failure,
+    /// or null when the sheet passes validation.
+    /// </summary>
+    private static string? ValidateTemplateHeaders(IXLWorksheet ws, string sheetName)
+    {
+        // Build a combined string of all header-row content and check for required keywords
+        var headerCells = Enumerable.Range(1, 43)
+            .Select(c => ws.Cell(HeaderRow, c).GetString().ToLowerInvariant())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        var joined = string.Join(" ", headerCells);
+
+        foreach (var keyword in RequiredHeaderKeywords)
+        {
+            if (!joined.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                return $"Sheet \"{sheetName}\" does not match the official SIP template. " +
+                       $"Missing expected header: \"{keyword}\". " +
+                       "Please use the School Implementation Plan template available via the Templates button.";
+        }
+
+        // Verify each of the 4 section start columns has "key result area"
+        foreach (var (category, startCol) in TemplateSections)
+        {
+            var kraHeader = ws.Cell(HeaderRow, startCol).GetString().ToLowerInvariant();
+            if (!kraHeader.Contains("key result area"))
+                return $"Sheet \"{sheetName}\" does not match the official SIP template. " +
+                       $"Expected 'Key Result Area' header at column {startCol} " +
+                       $"(section: {category}). " +
+                       "Please use the School Implementation Plan template.";
+        }
+
+        return null; // passed
+    }
+
+    /// <summary>
+    /// Reads one row for one category section. Returns null when the row is
+    /// blank / not a real data entry (NONE placeholder, empty, or sub-total).
+    /// </summary>
+    private static ImplementationItem? ParseRowSection(
+        IXLWorksheet ws, int row, int startCol,
+        string category, string dateString)
+    {
+        var kra  = ws.Cell(row, startCol + OffKra).GetString().Trim();
+        var sip  = ws.Cell(row, startCol + OffSip).GetString().Trim();
+        var ppa  = ws.Cell(row, startCol + OffPpa).GetString().Trim();
+
+        // Skip blank rows
+        if (string.IsNullOrWhiteSpace(kra) && string.IsNullOrWhiteSpace(ppa)) return null;
+
+        // Skip NONE placeholder rows
+        if (kra.Equals("NONE", StringComparison.OrdinalIgnoreCase) ||
+            ppa.Equals("NONE", StringComparison.OrdinalIgnoreCase)) return null;
+
+        // Skip sub-total or total rows
+        if (ppa.Contains("sub-total",   StringComparison.OrdinalIgnoreCase) ||
+            kra.Contains("sub-total",   StringComparison.OrdinalIgnoreCase) ||
+            ppa.Contains("total budget",StringComparison.OrdinalIgnoreCase) ||
+            kra.Contains("total budget",StringComparison.OrdinalIgnoreCase)) return null;
+
+        // Parse cost — strip ₱, commas, whitespace
+        var costText  = ws.Cell(row, startCol + OffCost).GetString().Trim();
+        var cleanCost = System.Text.RegularExpressions.Regex.Replace(costText, @"[₱,\s]", "");
+        double.TryParse(cleanCost,
+            System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out double estimatedCost);
+
+        // Skip rows with no activity and no cost
+        if (string.IsNullOrWhiteSpace(ppa) && estimatedCost == 0) return null;
+
+        return new ImplementationItem
+        {
+            Date            = dateString,
+            Kra             = kra,
+            SipProgram      = string.IsNullOrWhiteSpace(sip) ? "Unimplemented" : sip,
+            ExpenditureType = category,
+            Activity        = ppa,
+            Purpose         = ws.Cell(row, startCol + OffPurpose ).GetString().Trim(),
+            Indicator       = ws.Cell(row, startCol + OffPerfInd ).GetString().Trim(),
+            Resources       = ws.Cell(row, startCol + OffResDesc ).GetString().Trim(),
+            Quantity        = ws.Cell(row, startCol + OffQty     ).GetString().Trim(),
+            EstimatedCost   = estimatedCost,
+            AccountTitle    = ws.Cell(row, startCol + OffAccTitle).GetString().Trim(),
+            AccountCode     = ws.Cell(row, startCol + OffAccCode ).GetString().Trim(),
+        };
+    }
 
     private static bool IsMonthSheet(string name) =>
         MonthOrder.Any(m => string.Equals(name.Trim(), m, StringComparison.OrdinalIgnoreCase));
@@ -499,10 +598,6 @@ public class SchoolImplementationController : ControllerBase
     private static string? ParseMonth(string dateStr) =>
         DateTime.TryParse(dateStr, out var dt) ? dt.ToString("MMMM") : null;
 
-    /// <summary>
-    /// Groups a flat item list into MonthSheetDtos with per-category subtotals
-    /// and monthly grand totals. Reused by GetPlanById.
-    /// </summary>
     private List<MonthSheetDto> BuildMonthDtos(IEnumerable<ImplementationItem> allItems)
     {
         return allItems
@@ -514,8 +609,7 @@ public class SchoolImplementationController : ControllerBase
             {
                 var month  = monthGroup.Key!;
                 var hasSip = monthGroup.Any(i =>
-                    !string.IsNullOrWhiteSpace(i.SipProgram) &&
-                    i.SipProgram != "Unimplemented");
+                    !string.IsNullOrWhiteSpace(i.SipProgram) && i.SipProgram != "Unimplemented");
 
                 var items = monthGroup
                     .OrderBy(i =>
@@ -537,11 +631,12 @@ public class SchoolImplementationController : ControllerBase
                         i.AccountCode     ?? "",
                         i.ExpenditureType ?? "Regular Expenditure",
                         i.ArCode,
-                        i.IsVerified
+                        i.IsVerified,
+                        i.Status
                     ))
                     .ToList();
 
-                var subTotals = monthGroup
+                var subTotals  = monthGroup
                     .GroupBy(i => i.ExpenditureType ?? "Regular Expenditure")
                     .ToDictionary(g => g.Key, g => g.Sum(i => i.EstimatedCost ?? 0));
 
@@ -551,10 +646,4 @@ public class SchoolImplementationController : ControllerBase
             })
             .ToList();
     }
-
-    private record ColMap(
-        int Kra, int Sip, int Ppa, int Purpose,
-        int PerfInd, int ResDesc, int Qty,
-        int Cost, int AccTitle, int AccCode
-    );
 }

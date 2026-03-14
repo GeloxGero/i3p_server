@@ -1,44 +1,49 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using i3p_server.Models;
 using Microsoft.IdentityModel.Tokens;
+using i3p_server.Models;
 
 namespace i3p_server.Services;
 
 public class AuthService
 {
-    private readonly IConfiguration _configuration;
+    private readonly IConfiguration _config;
 
-    // The IDE can now find _configuration because it's injected here
-    public AuthService(IConfiguration configuration)
+    public AuthService(IConfiguration config)
     {
-        _configuration = configuration;
+        _config = config;
     }
 
-    // Changed to 'public' so your Controller can use it
+    /// <summary>
+    /// Generates a signed JWT containing the user's Id (as NameIdentifier),
+    /// Name, and Email. The token is valid for 7 days.
+    /// </summary>
     public string GenerateToken(Users user)
     {
-        // Add a check to ensure the Key isn't null
-        var key = _configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key is missing in appsettings.json");
-        
-        var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
-        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+        var jwtKey = _config["Jwt:Key"]
+                     ?? throw new InvalidOperationException("Jwt:Key is not configured in appsettings.");
 
+        var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        // ── Claims ────────────────────────────────────────────────────────────
+        // NameIdentifier is the claim GetProfile reads with:
+        //   User.FindFirst(ClaimTypes.NameIdentifier)?.Value
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Email, user.Email),
-            new Claim(ClaimTypes.Role, user.Authority.ToString()),
-            new Claim("Name", user.Name)
+            new Claim(ClaimTypes.Name,           user.Name),
+            new Claim(ClaimTypes.Email,          user.Email),
         };
 
         var token = new JwtSecurityToken(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.UtcNow.AddHours(8), // Use UtcNow for consistency
-            signingCredentials: credentials);
+            issuer:             _config["Jwt:Issuer"]   ?? "i3p-server",
+            audience:           _config["Jwt:Audience"] ?? "i3p-client",
+            claims:             claims,
+            expires:            DateTime.UtcNow.AddDays(7),
+            signingCredentials: creds
+        );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
