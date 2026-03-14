@@ -120,7 +120,7 @@ public class ArController : ControllerBase
 
         var fakes = Enumerable.Range(1, 3).Select(i =>
         {
-            double price = Math.Round(rng.NextDouble() * 5000 + 500, 2);
+            double price = Math.Round(rng.NextDouble() * 500 + 500, 2);
             double qty   = rng.Next(1, 20);
             return new AppItem
             {

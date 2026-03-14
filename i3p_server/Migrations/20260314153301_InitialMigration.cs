@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace i3p_server.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialMigration : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -83,6 +83,7 @@ namespace i3p_server.Migrations
                     Year = table.Column<int>(type: "integer", nullable: false),
                     SheetName = table.Column<string>(type: "text", nullable: false),
                     TotalEstimatedCost = table.Column<double>(type: "double precision", nullable: false),
+                    AnnualBudget = table.Column<double>(type: "double precision", nullable: true),
                     AuxilliaryJson = table.Column<string>(type: "text", nullable: true),
                     HeadersJson = table.Column<string>(type: "text", nullable: true)
                 },

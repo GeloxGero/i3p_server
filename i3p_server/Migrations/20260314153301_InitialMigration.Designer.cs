@@ -12,8 +12,8 @@ using i3p_server.Models;
 namespace i3p_server.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260314071717_AddAnnualBudget")]
-    partial class AddAnnualBudget
+    [Migration("20260314153301_InitialMigration")]
+    partial class InitialMigration
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
