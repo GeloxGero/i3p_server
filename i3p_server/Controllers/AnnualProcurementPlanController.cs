@@ -3,8 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using i3p_server.Models;
 using System.Text.Json;
 using ClosedXML.Excel;
-using CloudinaryDotNet;
-using CloudinaryDotNet.Actions;
 
 namespace i3p_server.Controllers;
 
@@ -27,7 +25,6 @@ namespace i3p_server.Controllers;
 public class AnnualProcurementPlanController : ControllerBase
 {
     private readonly AppDbContext _context;
-    private readonly Cloudinary _cloudinary;
     private const int DataStartRow = 5;
 
     public AnnualProcurementPlanController(AppDbContext context)
@@ -58,45 +55,7 @@ public class AnnualProcurementPlanController : ControllerBase
             .Include(p => p.Items)
             .ToListAsync();
     }
-    [HttpPost("items/{id}/upload-photo")]
-    public async Task<IActionResult> UploadPhoto(int id, IFormFile file)
-    {
-        // Validation logic
-        if (file == null || file.Length == 0)
-            return BadRequest("No file uploaded");
-    
-        if (file.Length > 10 * 1024 * 1024) // 10MB limit
-            return BadRequest("File too large (max 10MB)");
 
-        // 1. Find the item first
-        var item = await _context.AppItems.FindAsync(id);
-        if (item == null)
-            return NotFound("Item not found");
-
-        // 2. Open the stream from the uploaded IFormFile
-        using var stream = file.OpenReadStream();
-
-        var uploadParams = new ImageUploadParams()
-        {
-            // Use the Stream and the Original FileName
-            File = new FileDescription(file.FileName, stream),
-    
-            // This keeps the original filename in the Cloudinary URL
-            UseFilename = true,
-            UniqueFilename = true, // Adds a small random suffix to prevent name collisions
-            
-        };
-
-        // 3. Perform the upload asynchronously
-        var uploadResult = await _cloudinary.UploadAsync(uploadParams);
-
-        // 4. Save the result
-        item.PhotoPath = uploadResult.SecureUrl.ToString();
-        await _context.SaveChangesAsync();
-
-        return Ok(new { photoPath = item.PhotoPath });
-    }
-    
     // GET: api/AnnualProcurementPlan/5
     [HttpGet("{id}")]
     public async Task<ActionResult<AnnualProcurementPlan>> GetPlan(int id)
@@ -254,20 +213,6 @@ public class AnnualProcurementPlanController : ControllerBase
         _context.AnnualProcurementPlan.AddRange(allPlans);
         await _context.SaveChangesAsync();
         return Ok(new { Message = "Bulk seed successful", PlansCreated = allPlans.Count });
-    }
-    
-    [HttpPatch("items/{id}/verify")]
-    public async Task<IActionResult> VerifyPhoto(int id, [FromBody] string adminUsername)
-    {
-        var item = await _context.AppItems.FindAsync(id);
-        if (item == null) return NotFound();
-
-        item.IsPhotoVerified = true;
-        item.VerifiedAt = DateTime.UtcNow;
-        item.VerifiedBy = adminUsername;
-
-        await _context.SaveChangesAsync();
-        return Ok(item);
     }
 }
 
