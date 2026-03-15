@@ -17,6 +17,19 @@ var jwtKey = builder.Configuration["Jwt:Key"]
 
 
 builder.Services.AddHttpClient();
+builder.Services.AddControllers();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend",
+        policy => policy.WithOrigins("https://i3p.onrender.com", "https://i3p-1.onrender.com")
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .WithExposedHeaders("Content-Disposition")
+    );
+});
+
+
 builder.Services
     .AddAuthentication(options =>
     {
@@ -42,13 +55,7 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowFrontend",
-        policy => policy.WithOrigins("https://i3p.onrender.com", "https://i3p-1.onrender.com")
-            .AllowAnyMethod()
-            .AllowAnyHeader());
-});
+
 
 // Register Cloudinary
 var account = new Account(
@@ -85,10 +92,11 @@ if (app.Environment.IsDevelopment())
 }
 
 
-app.UseCors("AllowFrontend");
+
 
 app.UseHttpsRedirection();
 app.UseRouting();
+app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

@@ -5,56 +5,36 @@ using Microsoft.AspNetCore.Mvc;
 public class TemplateController : ControllerBase
 {
     private readonly IHttpClientFactory _httpFactory;
-    private readonly IConfiguration _config;
 
-    public TemplateController(IHttpClientFactory httpFactory, IConfiguration config)
+    public TemplateController(IHttpClientFactory httpFactory)
     {
         _httpFactory = httpFactory;
-        _config = config;
     }
-    
-    //helper function for downloading xlsx files
-    private async Task<IActionResult> ProxyFileFromCloudinary(string url, string contentType, string fileName)
+
+    private async Task<IActionResult> ProxyFile(string url, string fileName)
     {
         var client = _httpFactory.CreateClient();
-        var response = await client.GetAsync(url);
+        // Start reading headers immediately
+        var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
 
         if (!response.IsSuccessStatusCode)
-            return NotFound("Template file could not be retrieved from cloud storage.");
+            return NotFound("File not found in storage.");
 
         var stream = await response.Content.ReadAsStreamAsync();
         
-        // This returns the file stream directly to the user's browser
-        return File(stream, contentType, fileName);
+        // application/octet-stream is a safe catch-all for downloads, 
+        // or use the specific Excel MIME type we discussed earlier.
+        return new FileStreamResult(stream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        {
+            FileDownloadName = fileName
+        };
     }
 
-    // 1. Download Image from Cloudinary
-    [HttpGet("download-image")]
-    public async Task<IActionResult> DownloadImage()
-    {
-        var url = "https://res.cloudinary.com/demo/image/upload/sample.jpg"; // Replace with your config
-        return await ProxyFileFromCloudinary(url, "image/jpeg", "TemplateImage.jpg");
-    }
-
-    //Download download-procurement-plan from Cloudinary
-    [HttpGet("download-procurement-plan")]
-    public async Task<IActionResult> DownloadAnnualPlan()
-    {
-        var url = "https://res.cloudinary.com/dlzobzben/raw/upload/v1773595856/AnnualProcurementPlan_Template_tep3fq.xlsx"; // Replace with your config
-        string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-        
-        return await ProxyFileFromCloudinary(url, contentType, "AnnualPlanTemplate.xlsx");
-    }
-    
-    //Download download-school-implementation-plan from Cloudinary
     [HttpGet("download-school-implementation-plan")]
-    public async Task<IActionResult> DownloadSchoolImplementationPlan()
-    {
-        var url = "https://res.cloudinary.com/dlzobzben/raw/upload/v1773595856/SchoolImplementationPlan_Template_vn7ijg.xlsx"; // Replace with your config
-        string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-        
-        return await ProxyFileFromCloudinary(url, contentType, "SchoolImplementationPlanTemplate.xlsx");
-    }
+    public async Task<IActionResult> DownloadSIP() =>
+        await ProxyFile("https://res.cloudinary.com/dlzobzben/raw/upload/SchoolImplementationPlan_Template_vn7ijg.xlsx", "SchoolImplementationPlan_Template.xlsx");
 
-
+    [HttpGet("download-procurement-plan")]
+    public async Task<IActionResult> DownloadAPP() =>
+        await ProxyFile("https://res.cloudinary.com/dlzobzben/raw/upload/AnnualProcurementPlan_Template_tep3fq.xlsx", "AnnualProcurementPlan_Template.xlsx");
 }
