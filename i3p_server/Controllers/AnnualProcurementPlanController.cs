@@ -84,9 +84,7 @@ public class AnnualProcurementPlanController : ControllerBase
             // This keeps the original filename in the Cloudinary URL
             UseFilename = true,
             UniqueFilename = true, // Adds a small random suffix to prevent name collisions
-    
-            Folder = "app-items/verification",
-            Transformation = new Transformation().Quality("auto").FetchFormat("auto")
+            
         };
 
         // 3. Perform the upload asynchronously
@@ -97,10 +95,6 @@ public class AnnualProcurementPlanController : ControllerBase
         await _context.SaveChangesAsync();
 
         return Ok(new { photoPath = item.PhotoPath });
-    }
-    public class PhotoPathRequest
-    {
-        public string PhotoPath { get; set; }
     }
     
     // GET: api/AnnualProcurementPlan/5
