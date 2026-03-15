@@ -217,20 +217,19 @@ public class ArController : ControllerBase
         return Ok(new { item.PhotoPath, Message = "Uploaded. Awaiting admin verification." });
     }
 
-    // ── POST /api/Ar/verify-photo/{appItemId} ─────────────────────────────────
-    // Admin confirms a photo — recomputes parent SIP row's IsVerified.
-    [HttpPost("verify-photo/{appItemId:int}")]
-    public async Task<IActionResult> VerifyPhoto(int appItemId, [FromBody] VerifyPhotoRequest req)
+    //[HttpPost("verify-photo/{appItemId:int}")]
+    public async Task<IActionResult> VerifyPhoto(int appItemId, [FromBody] VerifyPhotoRequest? req)
     {
         var item = await _db.AppItems.FindAsync(appItemId);
         if (item is null) return NotFound();
 
-        // if (string.IsNullOrWhiteSpace(item.PhotoPath))
-        //     return BadRequest("No photo uploaded yet.");
+        // Validate request
+        if (req?.VerifiedBy == null || string.IsNullOrWhiteSpace(req.VerifiedBy))
+            return BadRequest("VerifiedBy is required.");
 
         item.IsPhotoVerified = true;
-        item.VerifiedAt      = DateTime.UtcNow;
-        item.VerifiedBy      = req.VerifiedBy;
+        item.VerifiedAt = DateTime.UtcNow;
+        item.VerifiedBy = req.VerifiedBy;
 
         if (!string.IsNullOrWhiteSpace(item.ArCode))
         {
