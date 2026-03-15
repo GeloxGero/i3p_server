@@ -259,36 +259,15 @@ public class AnnualProcurementPlanController : ControllerBase
     [HttpPatch("items/{id}/verify")]
     public async Task<IActionResult> VerifyPhoto(int id, [FromBody] string adminUsername)
     {
-        using var transaction = await _context.Database.BeginTransactionAsync();
-        try 
-        {
-            var item = await _context.AppItems.FindAsync(id);
-            if (item == null) return NotFound();
+        var item = await _context.AppItems.FindAsync(id);
+        if (item == null) return NotFound();
 
-            // 1. Update the item itself
-            item.IsPhotoVerified = true;
-            item.VerifiedAt = DateTime.UtcNow;
-            item.VerifiedBy = adminUsername;
+        item.IsPhotoVerified = true;
+        item.VerifiedAt = DateTime.UtcNow;
+        item.VerifiedBy = adminUsername;
 
-            // 2. Logic for related items (e.g., Cross-references)
-            // If this item is linked to a specific plan, you might want to update status there too
-            var relatedRefs = await _context.PlanCrossReferences
-                .Where(cr => cr.AppItemId == id)
-                .ToListAsync();
-            
-            // Example: Mark linked implementation steps as 'Partially Verified' or 'Complete'
-            // foreach(var rel in relatedRefs) { ... logic ... }
-
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            return Ok(item);
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            return StatusCode(500, ex.Message);
-        }
+        await _context.SaveChangesAsync();
+        return Ok(item);
     }
 }
 
