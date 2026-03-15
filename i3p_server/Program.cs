@@ -5,6 +5,8 @@ using Microsoft.IdentityModel.Tokens;
 using i3p_server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using System.Text;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,7 +48,14 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader());
 });
 
-// Add services to the container.
+// Register Cloudinary
+var account = new Account(
+    builder.Configuration["Cloudinary:CloudName"],
+    builder.Configuration["Cloudinary:ApiKey"],
+    builder.Configuration["Cloudinary:ApiSecret"]
+);
+builder.Services.AddSingleton(new Cloudinary(account));
+
 
 
 builder.Services.AddControllers();
@@ -81,6 +90,8 @@ app.UseCors("AllowStaticSite");
 app.UseStaticFiles();
 
 
+
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -88,5 +99,6 @@ app.UseAuthorization();
 
 app.UseHttpsRedirection();
 app.MapControllers();
+
 
 app.Run();

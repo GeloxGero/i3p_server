@@ -1,47 +1,60 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.StaticFiles;
 
-namespace YourProject.Controllers
+[ApiController]
+[Route("api/templates")]
+public class TemplateController : ControllerBase
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class TemplateController : ControllerBase
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly IConfiguration _config;
+
+    public TemplateController(IHttpClientFactory httpFactory, IConfiguration config)
     {
-        private readonly IWebHostEnvironment _env;
-
-        public TemplateController(IWebHostEnvironment env)
-        {
-            _env = env;
-        }
-
-        [HttpGet("{fileName}")]
-        public IActionResult DownloadTemplate(string fileName)
-        {
-            // 1. Locate the file within wwwroot/templates
-            // Using Path.Combine ensures cross-platform compatibility (Windows/Linux)
-            var filePath = Path.Combine(_env.WebRootPath, "templates", fileName);
-
-            // 2. Security Check: Ensure the file actually exists
-            if (!System.IO.File.Exists(filePath))
-            {
-                return NotFound(new { message = $"Template '{fileName}' not found on server." });
-            }
-
-            // 3. Determine the MIME type (e.g., application/vnd.ms-excel)
-            var provider = new FileExtensionContentTypeProvider();
-            if (!provider.TryGetContentType(filePath, out var contentType))
-            {
-                // Fallback for unknown types
-                contentType = "application/octet-stream";
-            }
-
-            // 4. Read the file into a stream
-            var bytes = System.IO.File.ReadAllBytes(filePath);
-
-            // 5. Return the file with the proper headers
-            // This triggers the browser's download dialog
-            return File(bytes, contentType, fileName);
-        }
+        _httpFactory = httpFactory;
+        _config = config;
     }
+    
+    //helper function for downloading xlsx files
+    private async Task<IActionResult> ProxyFileFromCloudinary(string url, string contentType, string fileName)
+    {
+        var client = _httpFactory.CreateClient();
+        var response = await client.GetAsync(url);
+
+        if (!response.IsSuccessStatusCode)
+            return NotFound("Template file could not be retrieved from cloud storage.");
+
+        var stream = await response.Content.ReadAsStreamAsync();
+        
+        // This returns the file stream directly to the user's browser
+        return File(stream, contentType, fileName);
+    }
+
+    // 1. Download Image from Cloudinary
+    [HttpGet("download-image")]
+    public async Task<IActionResult> DownloadImage()
+    {
+        var url = "https://res.cloudinary.com/demo/image/upload/sample.jpg"; // Replace with your config
+        return await ProxyFileFromCloudinary(url, "image/jpeg", "TemplateImage.jpg");
+    }
+
+    //Download download-procurement-plan from Cloudinary
+    [HttpGet("download-procurement-plan")]
+    public async Task<IActionResult> DownloadAnnualPlan()
+    {
+        var url = "https://res.cloudinary.com/dlzobzben/raw/upload/v1773595856/AnnualProcurementPlan_Template_tep3fq.xlsx"; // Replace with your config
+        string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        
+        return await ProxyFileFromCloudinary(url, contentType, "AnnualPlanTemplate.xlsx");
+    }
+    
+    //Download download-school-implementation-plan from Cloudinary
+    [HttpGet("download-school-implementation-plan")]
+    public async Task<IActionResult> DownloadSchoolImplementationPlan()
+    {
+        var url = "https://res.cloudinary.com/dlzobzben/raw/upload/v1773595856/SchoolImplementationPlan_Template_vn7ijg.xlsx"; // Replace with your config
+        string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        
+        return await ProxyFileFromCloudinary(url, contentType, "SchoolImplementationPlanTemplate.xlsx");
+    }
+
+
 }
