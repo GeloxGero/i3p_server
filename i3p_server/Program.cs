@@ -85,22 +85,12 @@ if (app.Environment.IsDevelopment())
 }
 
 
-app.UseRouting();
-
 app.UseCors("AllowFrontend");
-app.UseCors("AllowStaticSite");
-app.UseStaticFiles();
-
-
-
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-
 
 app.UseHttpsRedirection();
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
-
 
 app.Run();
