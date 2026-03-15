@@ -59,40 +59,22 @@ public class AnnualProcurementPlanController : ControllerBase
             .ToListAsync();
     }
 
-    [HttpPost("items/{id}/upload-photo")]
-    public async Task<IActionResult> UploadPhoto(int id, IFormFile file) // Ensure 'file' matches the FormData key
+    [HttpPost("{id}/upload-photo")]
+    public async Task<IActionResult> UploadPhoto(int id, [FromBody] PhotoPathRequest request)
     {
-        var item = await _context.AppItems.FindAsync(id);
-        if (item == null) return NotFound("AppItem not found");
+        // Save the photoPath (Cloudinary URL) to the database
+        var appItem = await _context.AppItems.FindAsync(id);
+        if (appItem == null) return NotFound();
 
-        if (file == null || file.Length == 0) return BadRequest("Invalid file");
+        appItem.PhotoPath = request.PhotoPath;
+        await _context.SaveChangesAsync();
 
-        try 
-        {
-            using var stream = file.OpenReadStream();
-            var uploadParams = new ImageUploadParams()
-            {
-                File = new FileDescription(file.FileName, stream),
-                Folder = "app-items/verification",
-                // This ensures the image is optimized for viewing on the AR page
-                Transformation = new Transformation().Quality("auto").FetchFormat("auto")
-            };
+        return Ok();
+    }
 
-            var uploadResult = await _cloudinary.UploadAsync(uploadParams);
-
-            if (uploadResult.Error != null) return BadRequest(uploadResult.Error.Message);
-
-            // This saves the full URL: https://res.cloudinary.com/dlzobzben/image/upload/...
-            item.PhotoPath = uploadResult.SecureUrl.ToString();
-        
-            await _context.SaveChangesAsync();
-
-            return Ok(new { photoPath = item.PhotoPath });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
-        }
+    public class PhotoPathRequest
+    {
+        public string PhotoPath { get; set; }
     }
     
     // GET: api/AnnualProcurementPlan/5
