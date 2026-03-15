@@ -15,6 +15,8 @@ var builder = WebApplication.CreateBuilder(args);
 var jwtKey = builder.Configuration["Jwt:Key"]
              ?? throw new InvalidOperationException("Jwt:Key is missing from appsettings.json");
 
+
+builder.Services.AddHttpClient();
 builder.Services
     .AddAuthentication(options =>
     {
