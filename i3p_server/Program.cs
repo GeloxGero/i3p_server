@@ -77,6 +77,7 @@ if (app.Environment.IsDevelopment())
 app.UseRouting();
 
 app.UseCors("AllowFrontend");
+app.UseCors("AllowStaticSite");
 app.UseStaticFiles();
 
 
