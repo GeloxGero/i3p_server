@@ -41,7 +41,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend",
-        policy => policy.WithOrigins("https://i3p.onrender.com")
+        policy => policy.WithOrigins("https://i3p.onrender.com", "https://i3p-1.onrender.com")
             .AllowAnyMethod()
             .AllowAnyHeader());
 });
