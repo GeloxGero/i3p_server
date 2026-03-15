@@ -58,20 +58,46 @@ public class AnnualProcurementPlanController : ControllerBase
             .Include(p => p.Items)
             .ToListAsync();
     }
-
-    [HttpPost("{id}/upload-photo")]
-    public async Task<IActionResult> UploadPhoto(int id, [FromBody] PhotoPathRequest request)
+    [HttpPost("items/{id}/upload-photo")]
+    public async Task<IActionResult> UploadPhoto(int id, IFormFile file)
     {
-        // Save the photoPath (Cloudinary URL) to the database
-        var appItem = await _context.AppItems.FindAsync(id);
-        if (appItem == null) return NotFound();
+        // Validation logic
+        if (file == null || file.Length == 0)
+            return BadRequest("No file uploaded");
+    
+        if (file.Length > 10 * 1024 * 1024) // 10MB limit
+            return BadRequest("File too large (max 10MB)");
 
-        appItem.PhotoPath = request.PhotoPath;
+        // 1. Find the item first
+        var item = await _context.AppItems.FindAsync(id);
+        if (item == null)
+            return NotFound("Item not found");
+
+        // 2. Open the stream from the uploaded IFormFile
+        using var stream = file.OpenReadStream();
+
+        var uploadParams = new ImageUploadParams()
+        {
+            // Use the Stream and the Original FileName
+            File = new FileDescription(file.FileName, stream),
+    
+            // This keeps the original filename in the Cloudinary URL
+            UseFilename = true,
+            UniqueFilename = true, // Adds a small random suffix to prevent name collisions
+    
+            Folder = "app-items/verification",
+            Transformation = new Transformation().Quality("auto").FetchFormat("auto")
+        };
+
+        // 3. Perform the upload asynchronously
+        var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+
+        // 4. Save the result
+        item.PhotoPath = uploadResult.SecureUrl.ToString();
         await _context.SaveChangesAsync();
 
-        return Ok();
+        return Ok(new { photoPath = item.PhotoPath });
     }
-
     public class PhotoPathRequest
     {
         public string PhotoPath { get; set; }
