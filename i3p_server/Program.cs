@@ -38,13 +38,12 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
-//policy.WithOrigins("http://localhost:4321")
-builder.Services.AddCors(options => {
-    options.AddDefaultPolicy(policy => {
-        policy.AllowAnyOrigin() // Your Astro URL
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend",
+        policy => policy.WithOrigins("https://i3p.onrender.com")
+            .AllowAnyMethod()
+            .AllowAnyHeader());
 });
 
 // Add services to the container.
