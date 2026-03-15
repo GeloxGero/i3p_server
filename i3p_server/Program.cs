@@ -74,7 +74,7 @@ if (app.Environment.IsDevelopment())
 }
 
 
-app.UseCors();
+app.UseCors("AllowFrontend");
 app.UseStaticFiles();
 
 
