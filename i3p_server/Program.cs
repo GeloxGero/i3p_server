@@ -59,12 +59,13 @@ builder.Services.AddAuthorization();
 
 
 // Register Cloudinary
-var account = new Account(
+var account = new CloudinaryDotNet.Account(
     builder.Configuration["Cloudinary:CloudName"],
     builder.Configuration["Cloudinary:ApiKey"],
     builder.Configuration["Cloudinary:ApiSecret"]
 );
-builder.Services.AddSingleton(new Cloudinary(account));
+var cloudinary = new CloudinaryDotNet.Cloudinary(account);
+builder.Services.AddSingleton(cloudinary);
 
 
 

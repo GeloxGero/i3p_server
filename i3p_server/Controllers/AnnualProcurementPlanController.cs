@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using i3p_server.Models;
 using System.Text.Json;
 using ClosedXML.Excel;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 
 namespace i3p_server.Controllers;
 
@@ -25,6 +27,7 @@ namespace i3p_server.Controllers;
 public class AnnualProcurementPlanController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly Cloudinary _cloudinary;
     private const int DataStartRow = 5;
 
     public AnnualProcurementPlanController(AppDbContext context)
@@ -56,6 +59,42 @@ public class AnnualProcurementPlanController : ControllerBase
             .ToListAsync();
     }
 
+    [HttpPost("items/{id}/upload-photo")]
+    public async Task<IActionResult> UploadPhoto(int id, IFormFile file) // Ensure 'file' matches the FormData key
+    {
+        var item = await _context.AppItems.FindAsync(id);
+        if (item == null) return NotFound("AppItem not found");
+
+        if (file == null || file.Length == 0) return BadRequest("Invalid file");
+
+        try 
+        {
+            using var stream = file.OpenReadStream();
+            var uploadParams = new ImageUploadParams()
+            {
+                File = new FileDescription(file.FileName, stream),
+                Folder = "app-items/verification",
+                // This ensures the image is optimized for viewing on the AR page
+                Transformation = new Transformation().Quality("auto").FetchFormat("auto")
+            };
+
+            var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+
+            if (uploadResult.Error != null) return BadRequest(uploadResult.Error.Message);
+
+            // This saves the full URL: https://res.cloudinary.com/dlzobzben/image/upload/...
+            item.PhotoPath = uploadResult.SecureUrl.ToString();
+        
+            await _context.SaveChangesAsync();
+
+            return Ok(new { photoPath = item.PhotoPath });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Internal server error: {ex.Message}");
+        }
+    }
+    
     // GET: api/AnnualProcurementPlan/5
     [HttpGet("{id}")]
     public async Task<ActionResult<AnnualProcurementPlan>> GetPlan(int id)
@@ -213,6 +252,21 @@ public class AnnualProcurementPlanController : ControllerBase
         _context.AnnualProcurementPlan.AddRange(allPlans);
         await _context.SaveChangesAsync();
         return Ok(new { Message = "Bulk seed successful", PlansCreated = allPlans.Count });
+    }
+    
+    [HttpPatch("items/{id}/verify")]
+    public async Task<IActionResult> VerifyPhoto(int id, [FromBody] string adminUsername)
+    {
+        var item = await _context.AppItems.FindAsync(id);
+        if (item == null || string.IsNullOrEmpty(item.PhotoPath)) 
+            return BadRequest("No photo to verify.");
+
+        item.IsPhotoVerified = true;
+        item.VerifiedAt = DateTime.UtcNow;
+        item.VerifiedBy = adminUsername;
+
+        await _context.SaveChangesAsync();
+        return Ok(item);
     }
 }
 
