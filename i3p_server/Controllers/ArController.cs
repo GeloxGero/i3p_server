@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using i3p_server.Models;
-
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
 namespace i3p_server.Controllers;
 
 // ─── Request / Response DTOs ──────────────────────────────────────────────────
@@ -28,7 +29,8 @@ public record ArAppItemDto(
     string?  PhotoPath,
     bool     IsPhotoVerified,
     DateTime? VerifiedAt,
-    string?  VerifiedBy
+    string?  VerifiedBy,
+    string? SecurePhotoUrl
 );
 
 public record ArDetailDto(
@@ -53,11 +55,13 @@ public class ArController : ControllerBase
 {
     private readonly AppDbContext      _db;
     private readonly IWebHostEnvironment _env;
+    private readonly Cloudinary _cloudinary;
 
-    public ArController(AppDbContext db, IWebHostEnvironment env)
+    public ArController(AppDbContext db, IWebHostEnvironment env, Cloudinary cloudinary)
     {
         _db  = db;
         _env = env;
+        _cloudinary = cloudinary;
     }
 
     // ── GET /api/Ar/{arCode} ──────────────────────────────────────────────────
@@ -177,6 +181,7 @@ public class ArController : ControllerBase
             Price           = req.Price,
             TotalAmount     = (req.TotalQuantity ?? 0) * (req.Price ?? 0),
             IsPhotoVerified = false,
+            
         };
 
         _db.AppItems.Add(item);
@@ -202,19 +207,30 @@ public class ArController : ControllerBase
         var item = await _db.AppItems.FindAsync(appItemId);
         if (item is null) return NotFound();
 
-        var folder   = Path.Combine(_env.WebRootPath, "uploads", "app-items", appItemId.ToString());
-        Directory.CreateDirectory(folder);
+        using var stream = photo.OpenReadStream();
+        var uploadParams = new ImageUploadParams
+        {
+            File = new FileDescription(photo.FileName, stream),
+            
+            //dev only
+            Unsigned = true,
+            UseFilename = true,
+        };
 
-        var fileName = $"{Guid.NewGuid():N}{ext}";
-        var filePath = Path.Combine(folder, fileName);
-
-        await using (var stream = System.IO.File.Create(filePath))
-            await photo.CopyToAsync(stream);
-
-        item.PhotoPath = $"uploads/app-items/{appItemId}/{fileName}";
+        var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+        
+        if (uploadResult.Error != null)
+        {
+            // This maps to the { error: { message: "..." } } JSON you provided
+            return BadRequest(uploadResult.Error.Message);
+        }
+        
+        item.SecurePhotoUrl = uploadResult.SecureUrl.ToString();
         await _db.SaveChangesAsync();
-
-        return Ok(new { item.PhotoPath, Message = "Uploaded. Awaiting admin verification." });
+        
+        
+        return Ok(new { Url = item.SecurePhotoUrl, 
+            Message = "Uploaded to Cloudinary. Awaiting admin verification." });
     }
 
     // ── POST /api/Ar/verify-photo/{appItemId} ─────────────────────────────────
@@ -322,7 +338,7 @@ public class ArController : ControllerBase
         var appDtos = apps.Select(a => new ArAppItemDto(
             a.Id, a.ArCode, a.ItemDescription, a.Specification, a.UnitOfMeasure,
             a.TotalQuantity, a.Price, a.TotalAmount, a.PhotoPath,
-            a.IsPhotoVerified, a.VerifiedAt, a.VerifiedBy
+            a.IsPhotoVerified, a.VerifiedAt, a.VerifiedBy, a.SecurePhotoUrl
         )).ToList();
 
         return new ArDetailDto(
@@ -335,6 +351,7 @@ public class ArController : ControllerBase
             sip.IsVerified,
             appDtos,
             TotalAppCost:   apps.Sum(a => a.TotalAmount  ?? 0),
+            
             VerifiedCount:  apps.Count(a => a.IsPhotoVerified),
             TotalCount:     apps.Count
         );

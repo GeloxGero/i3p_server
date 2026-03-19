@@ -64,6 +64,8 @@ public class AppItem
  
     /// <summary>True when a photo has been uploaded AND an admin has confirmed it.</summary>
     public bool IsPhotoVerified { get; set; } = false;
+    
+    public string? SecurePhotoUrl { get; set; } = string.Empty;
  
     // Navigation
     public List<PlanCrossReference> CrossReferences { get; set; } = new();

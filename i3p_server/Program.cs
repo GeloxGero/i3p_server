@@ -23,7 +23,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend",
-        policy => policy.WithOrigins("https://i3p.onrender.com", "https://i3p-1.onrender.com")
+        policy => policy.WithOrigins("https://i3p.onrender.com", "https://i3p-1.onrender.com", "http://localhost:10000")
             .AllowAnyMethod()
             .AllowAnyHeader()
             .WithExposedHeaders("Content-Disposition")
