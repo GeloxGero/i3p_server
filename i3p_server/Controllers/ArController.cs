@@ -241,9 +241,6 @@ public class ArController : ControllerBase
         var item = await _db.AppItems.FindAsync(appItemId);
         if (item is null) return NotFound();
 
-        if (string.IsNullOrWhiteSpace(item.PhotoPath))
-            return BadRequest("No photo uploaded yet.");
-
         item.IsPhotoVerified = true;
         item.VerifiedAt      = DateTime.UtcNow;
         item.VerifiedBy      = req.VerifiedBy;
