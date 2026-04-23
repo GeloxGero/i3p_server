@@ -63,31 +63,10 @@ public record CreateItemRequest(
     SipStatus Status
 );
 
-// ─── Template Column Layout ───────────────────────────────────────────────────
-// The official SIP template has 4 side-by-side category sections on every month sheet:
-//
-//   Section 1 — Regular Expenditure        : cols A–J  (1–10)
-//   [gap col K = 11]
-//   Section 2 — Project Related Expenditure: cols L–U  (12–21)
-//   [gap col V = 22]
-//   Section 3 — Repair and Maintenance     : cols W–AF (23–32)
-//   [gap col AG = 33]
-//   Section 4 — Others                     : cols AH–AQ(34–43)
-//
-//   Within each 10-column section (0-indexed offset from section start):
-//     +0  KRA
-//     +1  Specific Program (SIP)
-//     +2  Programs/Projects/Activities
-//     +3  Purpose / Objectives
-//     +4  Performance Indicator
-//     +5  Resources Needed Description
-//     +6  Resources Needed Quantity
-//     +7  Estimated Cost
-//     +8  Account Title
-//     +9  Account Code
-//
-//   Header row: row 4  (1-based)
-//   Data rows : row 5 onward
+public record ImportData(
+    List<CreateItemRequest> ItemRequests,
+    int Year
+);
 
 [Route("api/[controller]")]
 [ApiController]
@@ -179,151 +158,113 @@ public class SchoolImplementationController : ControllerBase
         return Ok(dto);
     }
 
-    // ── POST /api/SchoolImplementation/import ─────────────────────────────────
-    // Accepts ONLY files matching the official SIP template layout.
-    //
-    // Template structure (per month sheet):
-    //   Row 1 : "SCHOOL IMPLEMENTATION PLAN — <MONTH>" title
-    //   Row 2 : Instruction text
-    //   Row 3 : Category section labels
-    //   Row 4 : Column headers (KRA / SIP / PPA / … repeated 4×)
-    //   Row 5+: Data rows (one row = one item; same row number = same item across all 4 sections)
-    //
-    // The 4 sections are laid out horizontally:
-    //   Regular Expenditure (A–J) | gap | Project Related (L–U) | gap |
-    //   Repair and Maintenance (W–AF) | gap | Others (AH–AQ)
-    //
-    // Validation rejects files that do not match this header signature.
-    [HttpPost("import")]
-    public async Task<IActionResult> ImportExcel(IFormFile file)
+
+    // [HttpGet("get_duplicates")]
+    // public async Task<IActionResult> GetDuplicates(IFormFile file)
+    // {
+    //     
+    // }
+
+    [HttpPost("import_json")]
+    public async Task<IActionResult> ImportJson([FromBody] ImportData importData)
     {
-        if (file is null || file.Length == 0)
-            return BadRequest("No file provided.");
-
-        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) &&
-            !file.FileName.EndsWith(".xls",  StringComparison.OrdinalIgnoreCase))
-            return BadRequest("Only .xlsx / .xls files are accepted.");
-
-        using var stream   = file.OpenReadStream();
-        using var workbook = new XLWorkbook(stream);
-
-        var parsedItems     = new List<ImplementationItem>();
-        int? detectedYear   = null;
-        string? schoolName  = null;
-
-        foreach (var worksheet in workbook.Worksheets)
-        {
-            var sheetName = worksheet.Name.Trim();
-            if (!IsMonthSheet(sheetName)) continue;
-
-            var normalizedMonth = NormalizeMonthName(sheetName)!;
-
-            if (worksheet.RangeUsed() is null) continue;
-
-            // ── Template validation ───────────────────────────────────────────
-            // Verify the header row (row 4) matches the expected column pattern.
-            var validationError = ValidateTemplateHeaders(worksheet, sheetName);
-            if (validationError is not null)
-                return BadRequest(validationError);
-
-            // ── Detect year & school name from row 1 ──────────────────────────
-            if (!detectedYear.HasValue)
-            {
-                var titleCell = worksheet.Cell(1, 1).GetString();
-                schoolName = titleCell.Trim();
-
-                var yearMatch = System.Text.RegularExpressions.Regex
-                    .Match(titleCell, @"\b(20\d{2})\b");
-                if (yearMatch.Success && int.TryParse(yearMatch.Value, out int yr))
-                    detectedYear = yr;
-
-                // Also scan rows 1-3 for a year number
-                if (!detectedYear.HasValue)
-                {
-                    for (int r = 1; r <= 3 && !detectedYear.HasValue; r++)
-                    {
-                        int lastCol = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
-                        for (int c = 1; c <= lastCol; c++)
-                        {
-                            var txt   = worksheet.Cell(r, c).GetString();
-                            var match = System.Text.RegularExpressions.Regex.Match(txt, @"\b(20\d{2})\b");
-                            if (match.Success && int.TryParse(match.Value, out int y2))
-                            {
-                                detectedYear = y2;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                detectedYear  ??= DateTime.Now.Year;
-                schoolName    ??= $"School Implementation Plan {detectedYear}";
-            }
-
-            // ── Parse data rows ───────────────────────────────────────────────
-            int monthIndex = Array.IndexOf(MonthOrder, normalizedMonth) + 1;
-            var dateString = $"{detectedYear}-{monthIndex:D2}-01";
-            int lastRow    = worksheet.LastRowUsed()!.RowNumber();
-
-            for (int r = DataStart; r <= lastRow; r++)
-            {
-                // Parse items from each of the 4 sections in this row
-                foreach (var (category, startCol) in TemplateSections)
-                {
-                    var item = ParseRowSection(worksheet, r, startCol, category, dateString);
-                    if (item is not null)
-                        parsedItems.Add(item);
-                }
-            }
-        }
-
-        if (parsedItems.Count == 0)
+        var items = importData.ItemRequests;
+        var year = importData.Year;
+        int itemsCount = items.Count;
+        
+        
+        
+        if (items.Count == 0)
             return BadRequest(
                 "No data rows could be parsed. Make sure the file matches the " +
                 "official School Implementation Plan template and contains at least one data row.");
 
-        int    year         = detectedYear ?? DateTime.Now.Year;
-        string name         = schoolName   ?? $"School Implementation Plan {year}";
-        double importedTotal = parsedItems.Sum(i => i.EstimatedCost ?? 0);
 
-        // ── Append or create ──────────────────────────────────────────────────
-        var existing = await _context.SchoolImplementations
-            .FirstOrDefaultAsync(s => s.Year == year);
 
-        if (existing is not null)
-        {
-            foreach (var item in parsedItems)
+
+        var schoolItemImplementationList = items.Select(data => new ImplementationItem
             {
-                item.SchoolImplementationId = existing.Id;
-                _context.ImplementationItems.Add(item);
-            }
-            existing.TotalEstimatedCost += importedTotal;
-            if (existing.SheetName.StartsWith("School Implementation Plan "))
-                existing.SheetName = name;
+            Date = data.Date,
+            Kra = data.Kra,
+            SipProgram = data.SipProgram,
+            Activity = data.Activity,
+            Purpose = data.Purpose,
+            Indicator = data.Indicator,
+            Resources = data.Resources,
+            Quantity = data.Quantity,
+            EstimatedCost = data.EstimatedCost,
+            AccountTitle = data.AccountTitle,
+            AccountCode = data.AccountCode,
+            ExpenditureType  = data.ExpenditureType,
+        }).ToList();
+        
+        bool implementationYearExists = await  _context.SchoolImplementations.AnyAsync(s => s.Year == year);
+        
+        SchoolImplementation schoolImplementation;
+        if (!implementationYearExists)
+        {
+            schoolImplementation = new SchoolImplementation
+            {
+                Year = year,
+                SheetName = $"School Implementation for SY ${year}",
+                AnnualBudget = 50000000,
+                TotalEstimatedCost = 0,
+                Items = new List<ImplementationItem>(),
+            };
+            
+            _context.SchoolImplementations.Add(schoolImplementation);
         }
         else
         {
-            _context.SchoolImplementations.Add(new SchoolImplementation
-            {
-                Year               = year,
-                SheetName          = name,
-                TotalEstimatedCost = importedTotal,
-                Items              = parsedItems
-            });
+            schoolImplementation = await _context.SchoolImplementations.Include(s => s.Items).FirstOrDefaultAsync(s => s.Year == year);
         }
 
+        schoolImplementation.Items.AddRange(schoolItemImplementationList);
+        
+        
+        schoolImplementation.TotalEstimatedCost = schoolImplementation.Items.Sum(i => i.EstimatedCost ?? 0);
         await _context.SaveChangesAsync();
 
-        return Ok(new
+        foreach (var item in schoolItemImplementationList)
         {
-            Message = existing is not null
-                ? $"Appended {parsedItems.Count} items to existing {year} plan."
-                : $"Created new plan for {year} with {parsedItems.Count} items.",
-            Year          = year,
-            ItemCount     = parsedItems.Count,
-            ImportedTotal = importedTotal
-        });
+            if (string.IsNullOrEmpty(item.ArCode))
+            {
+                item.ArCode = $"AR{item.Id + 100}";
+            }
+        }
+        await _context.SaveChangesAsync();
+        
+        //double save changes to pass through implementation items again to populate the AR Codes 
+
+        return Ok(new { Message = $"Data received, added ${itemsCount} items to School Implementation Plan S.Y. ${year}"});
+        
+        // int    year         = detectedYear ?? DateTime.Now.Year;
+        // string name         = schoolName   ?? $"School Implementation Plan {year}";
+        // double importedTotal = parsedItems.Sum(i => i.EstimatedCost ?? 0);
+        
+        // var newImplementationPlans  =  _context.SchoolImplementations.Add(new SchoolImplementation
+        // {
+        //     Year               = year,
+        //     SheetName          = name,
+        //     TotalEstimatedCost = importedTotal,
+        //     Items              = parsedItems
+        // });
+    
+    
+        await _context.SaveChangesAsync();
+    
+        // return Ok(new
+        // {
+        //     Message = $"Appended {jsondata.Count} items to existing {year} plan.",
+        //     Year          = year,
+        //     ItemCount     = parsedItems.Count,
+        //     ImportedTotal = importedTotal,
+        //     NewImplementationPlans = newImplementationPlans,
+        // });
     }
+    
+    
+    
 
     // ── PUT /api/SchoolImplementation/{id}/budget ─────────────────────────────
     // Admin sets (or clears) the annual budget ceiling for a plan.
@@ -345,7 +286,8 @@ public class SchoolImplementationController : ControllerBase
             AnnualBudget = plan.AnnualBudget
         });
     }
-
+    
+    //adds new implementation item
     // ── POST /api/SchoolImplementation/item ───────────────────────────────────
     [HttpPost("item")]
     public async Task<IActionResult> AddImplementationItem([FromBody] CreateItemRequest req)
@@ -441,58 +383,7 @@ public class SchoolImplementationController : ControllerBase
         return Ok(new { Message = "Total recalculated.", NewTotal = plan.TotalEstimatedCost });
     }
 
-    // ── POST /api/SchoolImplementation/seed-bulk ──────────────────────────────
-    [HttpPost("seed-bulk")]
-    public async Task<IActionResult> SeedBulkDatabase()
-    {
-        if (_context.SchoolImplementations.Any())
-            return BadRequest("Database already contains data. Clear it first to re-seed.");
-
-        var random       = new Random();
-        var allReports   = new List<SchoolImplementation>();
-        string[] kras    = ["KRA 1: Strategic Leadership", "KRA 2: Operations Management", "KRA 3: Teaching & Learning", "KRA 4: HR Development"];
-        string[] titles  = ["Electricity Expenses", "Internet Subscription", "Office Supplies", "Security Services", "Training Expenses"];
-        string[] programs = ["Overhead", "ADM", "Senior High School Program", "SBM Initiatives", "Health & Nutrition"];
-
-        for (int i = 1; i <= 50; i++)
-        {
-            var report = new SchoolImplementation
-            {
-                SheetName = $"School Implementation Plan {2000 + i}",
-                Year      = 2000 + i,
-                Items     = new List<ImplementationItem>()
-            };
-            double total = 0;
-            int daysInYear  = DateTime.IsLeapYear(report.Year) ? 366 : 365;
-            var startOfYear = new DateTime(report.Year, 1, 1);
-            for (int j = 1; j <= 100; j++)
-            {
-                double cost = random.Next(500, 50000);
-                total += cost;
-                report.Items.Add(new ImplementationItem
-                {
-                    Date            = startOfYear.AddDays(random.Next(0, daysInYear)).ToString("yyyy-MM-dd"),
-                    Kra             = kras[random.Next(kras.Length)],
-                    SipProgram      = programs[random.Next(programs.Length)],
-                    ExpenditureType = CategoryOrder[random.Next(CategoryOrder.Length)],
-                    Activity        = $"Activity {j} for {report.Year}",
-                    Purpose         = "Support school operations and learner development",
-                    Indicator       = $"Target met for item {j}",
-                    Resources       = "Standard Operating Supplies",
-                    Quantity        = random.Next(1, 10).ToString(),
-                    EstimatedCost   = cost,
-                    AccountTitle    = titles[random.Next(titles.Length)],
-                    AccountCode     = (5020000000 + random.Next(1000, 9999)).ToString()
-                });
-            }
-            report.TotalEstimatedCost = total;
-            allReports.Add(report);
-        }
-
-        _context.SchoolImplementations.AddRange(allReports);
-        await _context.SaveChangesAsync();
-        return Ok($"Seeded 50 plans with {allReports.Sum(r => r.Items.Count)} total items.");
-    }
+    
 
     // ─── Private helpers ──────────────────────────────────────────────────────
 
@@ -647,3 +538,148 @@ public class SchoolImplementationController : ControllerBase
             .ToList();
     }
 }
+
+
+// [HttpPost("import")]
+    // public async Task<IActionResult> ImportExcel(IFormFile file)
+    // {
+    //     if (file is null || file.Length == 0)
+    //         return BadRequest("No file provided.");
+    //
+    //     if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) &&
+    //         !file.FileName.EndsWith(".xls",  StringComparison.OrdinalIgnoreCase))
+    //         return BadRequest("Only .xlsx / .xls files are accepted.");
+    //
+    //     using var stream   = file.OpenReadStream();
+    //     using var workbook = new XLWorkbook(stream);
+    //
+    //     var parsedItems     = new List<ImplementationItem>();
+    //     int? detectedYear   = null;
+    //     string? schoolName  = null;
+    //
+    //     foreach (var worksheet in workbook.Worksheets)
+    //     {
+    //         var sheetName = worksheet.Name.Trim();
+    //         if (!IsMonthSheet(sheetName)) continue;
+    //
+    //         var normalizedMonth = NormalizeMonthName(sheetName)!;
+    //
+    //         if (worksheet.RangeUsed() is null) continue;
+    //
+    //         // ── Template validation ───────────────────────────────────────────
+    //         // Verify the header row (row 4) matches the expected column pattern.
+    //         var validationError = ValidateTemplateHeaders(worksheet, sheetName);
+    //         if (validationError is not null)
+    //             return BadRequest(validationError);
+    //
+    //         // ── Detect year & school name from row 1 ──────────────────────────
+    //         if (!detectedYear.HasValue)
+    //         {
+    //             var titleCell = worksheet.Cell(1, 1).GetString();
+    //             schoolName = titleCell.Trim();
+    //
+    //             var yearMatch = System.Text.RegularExpressions.Regex
+    //                 .Match(titleCell, @"\b(20\d{2})\b");
+    //             if (yearMatch.Success && int.TryParse(yearMatch.Value, out int yr))
+    //                 detectedYear = yr;
+    //
+    //             // Also scan rows 1-3 for a year number
+    //             if (!detectedYear.HasValue)
+    //             {
+    //                 for (int r = 1; r <= 3 && !detectedYear.HasValue; r++)
+    //                 {
+    //                     int lastCol = worksheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+    //                     for (int c = 1; c <= lastCol; c++)
+    //                     {
+    //                         var txt   = worksheet.Cell(r, c).GetString();
+    //                         var match = System.Text.RegularExpressions.Regex.Match(txt, @"\b(20\d{2})\b");
+    //                         if (match.Success && int.TryParse(match.Value, out int y2))
+    //                         {
+    //                             detectedYear = y2;
+    //                             break;
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //
+    //             detectedYear  ??= DateTime.Now.Year;
+    //             schoolName    ??= $"School Implementation Plan {detectedYear}";
+    //         }
+    //
+    //         // ── Parse data rows ───────────────────────────────────────────────
+    //         int monthIndex = Array.IndexOf(MonthOrder, normalizedMonth) + 1;
+    //         var dateString = $"{detectedYear}-{monthIndex:D2}-01";
+    //         int lastRow    = worksheet.LastRowUsed()!.RowNumber();
+    //
+    //         for (int r = DataStart; r <= lastRow; r++)
+    //         {
+    //             // Parse items from each of the 4 sections in this row
+    //             foreach (var (category, startCol) in TemplateSections)
+    //             {
+    //                 var item = ParseRowSection(worksheet, r, startCol, category, dateString);
+    //                 if (item is not null)
+    //                     parsedItems.Add(item);
+    //             }
+    //         }
+    //     }
+    //
+    //     if (parsedItems.Count == 0)
+    //         return BadRequest(
+    //             "No data rows could be parsed. Make sure the file matches the " +
+    //             "official School Implementation Plan template and contains at least one data row.");
+    //
+    //     int    year         = detectedYear ?? DateTime.Now.Year;
+    //     string name         = schoolName   ?? $"School Implementation Plan {year}";
+    //     double importedTotal = parsedItems.Sum(i => i.EstimatedCost ?? 0);
+    //     
+    //     var newImplementationPlans  =  _context.SchoolImplementations.Add(new SchoolImplementation
+    //     {
+    //         Year               = year,
+    //         SheetName          = name,
+    //         TotalEstimatedCost = importedTotal,
+    //         Items              = parsedItems
+    //     });
+    //
+    //
+    //     await _context.SaveChangesAsync();
+    //
+    //     return Ok(new
+    //     {
+    //         Message = $"Appended {parsedItems.Count} items to existing {year} plan.",
+    //         Year          = year,
+    //         ItemCount     = parsedItems.Count,
+    //         ImportedTotal = importedTotal,
+    //         NewImplementationPlans = newImplementationPlans,
+    //     });
+    // }
+    
+    
+    
+    
+    
+    
+    // ─── Template Column Layout ───────────────────────────────────────────────────
+// The official SIP template has 4 side-by-side category sections on every month sheet:
+//
+//   Section 1 — Regular Expenditure        : cols A–J  (1–10)
+//   [gap col K = 11]
+//   Section 2 — Project Related Expenditure: cols L–U  (12–21)
+//   [gap col V = 22]
+//   Section 3 — Repair and Maintenance     : cols W–AF (23–32)
+//   [gap col AG = 33]
+//   Section 4 — Others                     : cols AH–AQ(34–43)
+//
+//   Within each 10-column section (0-indexed offset from section start):
+//     +0  KRA
+//     +1  Specific Program (SIP)
+//     +2  Programs/Projects/Activities
+//     +3  Purpose / Objectives
+//     +4  Performance Indicator
+//     +5  Resources Needed Description
+//     +6  Resources Needed Quantity
+//     +7  Estimated Cost
+//     +8  Account Title
+//     +9  Account Code
+//
+//   Header row: row 4  (1-based)
+//   Data rows : row 5 onward

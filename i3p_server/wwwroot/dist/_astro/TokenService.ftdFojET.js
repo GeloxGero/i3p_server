@@ -1,0 +1,1 @@
+import{d as n}from"./authStore.Cbqx1p1o.js";const i=n("https://i3p-server-1.onrender.com/");async function d(a,r={},t){i.get();const s=new Headers(r.headers);t&&s.set("Authorization",`Bearer ${t}`);const e=await fetch(`${a}`,{...r,headers:s});if(!e.ok){const o=await e.text();throw new Error(o||"API Request failed")}return e.json()}export{d as a};
